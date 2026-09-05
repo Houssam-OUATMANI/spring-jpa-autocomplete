@@ -3,7 +3,7 @@
   "displayName": "Spring JPA Autocomplete",
   "publisher": "houssam-ouatmani",
   "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, and query diagnostics for Java repositories.",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",
@@ -53,17 +53,18 @@
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "test:unit": "npm run compile && node --test out/test/standaloneRunner.js"
   },
   "devDependencies": {
-    "@types/vscode": "^1.136.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "typescript-eslint": "^8.61.1",
+    "@types/vscode": "^1.136.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
     "eslint": "^10.5.0",
     "typescript": "^6.0.3",
-    "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0"
+    "typescript-eslint": "^8.61.1"
   },
   "overrides": {
     "diff": "^8.0.4",

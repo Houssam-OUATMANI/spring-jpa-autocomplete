@@ -8,16 +8,31 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
 
 ## Features
 
-- Repository prefixes: `findBy`, `readBy`, `getBy`, `queryBy`, `searchBy`, `streamBy`, `countBy`, `existsBy`, `deleteBy`, and `removeBy`.
-- Operators: `And`, `Or`, `Is`, `Equals`, `Not`, `IsNull`, `IsNotNull`, `LessThan`, `GreaterThan`, `Between`, `Before`, `After`, `Like`, `Containing`, `In`, `True`, and `False`.
-- Modifiers: `Distinct`, `Top`, `First`, `IgnoreCase`, `AllIgnoreCase`, `OrderBy`, `Asc`, and `Desc`.
-- Property suggestions inferred from fields and getters in `@Entity` classes across the workspace.
-- Nested property suggestions for simple entity relations, such as `findByAddressCity`.
-- Diagnostics for unknown properties in derived query methods.
-- JPQL `@Query` diagnostics for unknown entities, properties, and named parameters.
-- JPQL property completion after an alias, such as `u.`.
-
-Property suggestions are sourced from `@Entity` classes in the current workspace and are filtered to the repository's entity when its generic type is available.
+- **Derived query completions**: `findBy`, `countBy`, `existsBy`, `deleteBy`, etc. with modifiers (`Distinct`, `Top`, `First`).
+- **Entity & Property model**:
+  - Support for `@Entity`, `@MappedSuperclass` inheritance, `@Embeddable`, and Java records.
+  - Automatic property detection for Lombok `@Data`, `@Getter`, `@Value`.
+  - Exclusion of `@Transient` fields and `transient` keyword.
+  - Nested property suggestions with both camelCase (`AddressCity`) and underscore (`Address_City`) navigation.
+- **Derived query validation**:
+  - Validates property existence against the repository's entity.
+  - Return type validation (`existsBy` must return `boolean`, `countBy` must return numeric `long`/`int`).
+  - Parameter validation: flags missing or extra method parameters and missing `Pageable` on `Page` return types.
+- **Advanced JPQL support**:
+  - Single-line and multi-line Java 15+ Text Blocks (`""" SELECT ... """`).
+  - Table and alias resolution for `FROM ... JOIN ...` clauses (e.g. `JOIN u.roles r`).
+  - Alias property completion (`u.` and `r.`) and parameter completion (`:`).
+  - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
+- **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
+  - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
+  - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
+  - Click on repository generic entity `JpaRepository<User, Long>` $\to$ opens `User.java`.
+- **Quick-Fixes (`Alt+Enter` / Lightbulb)**:
+  - Add missing parameter to repository method signature.
+  - Fix incompatible return type (`boolean`, `long`).
+  - Add `@Param` annotation to method parameter.
+  - Add `Pageable` parameter when returning `Page<T>`.
+- **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.
 
 ## Usage
 
@@ -27,36 +42,19 @@ Open a Java repository and type a method such as:
 Optional<User> findByEmailAndActiveOrderByCreatedAtDesc(String email, boolean active);
 ```
 
-JPQL repository methods with named parameters are also validated:
+Multi-line JPQL Text Blocks with aliases and named parameters are also validated:
 
 ```java
-@Query("SELECT u FROM User u WHERE u.id = :id")
-List<User> search(@Param("id") UUID id);
+@Query("""
+    SELECT o
+    FROM Order o
+    JOIN o.user u
+    WHERE u.email = :userEmail
+""")
+List<Order> findByUserEmail(@Param("userEmail") String userEmail);
 ```
 
-When a query contains an invalid entity, property, or named parameter, the extension marks the relevant token with a diagnostic in the editor.
-
-The extension is activated automatically for Java files. Suggestions can also be opened with `Ctrl+Space` or `Cmd+Space`.
-
-## Requirements
-
-VS Code 1.136 or later.
-
-The Java language support extension is recommended for the best Java editing experience, but is not required for basic completion.
-
-## Known limitations
-
-The parser currently uses source text and does not inspect compiled entities outside the current workspace. JPQL validation currently targets single-line `@Query("...")` annotations; text blocks and multi-line queries are not resolved yet. Complex Java syntax, Lombok-generated properties, custom attribute names, and advanced JPA mappings are not resolved yet. Save changed Java files to refresh the entity index.
-
-## Development
-
-```bash
-npm install
-npm test
-vsce package
-```
-
-## Release Notes
+Press `Ctrl+Click` on any property to navigate directly to its definition in the entity, or `Alt+Enter` on warnings/errors to apply Quick-Fixes.
 
 ### 0.0.2 - 2026-09-05
 
