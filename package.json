@@ -2,8 +2,8 @@
   "name": "spring-jpa-autocomplete",
   "displayName": "Spring JPA Autocomplete",
   "publisher": "houssam-ouatmani",
-  "description": "Autocomplete Spring Data JPA query methods, entity properties, operators, and sort modifiers in Java repositories.",
-  "version": "0.0.1",
+  "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, and query diagnostics for Java repositories.",
+  "version": "0.0.2",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",
@@ -26,7 +26,10 @@
     "repository",
     "autocomplete",
     "derived query",
-    "findby"
+    "findby",
+    "jpql",
+    "query",
+    "hibernate"
   ],
   "activationEvents": [
     "onLanguage:java"

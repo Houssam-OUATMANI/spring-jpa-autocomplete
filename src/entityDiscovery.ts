@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { extractPropertyNames } from './jpaKeywords';
+import { EntityProperty, extractPropertyNames } from './jpaKeywords';
 
 export interface EntityInfo {
 	readonly name: string;
-	readonly properties: readonly string[];
+	readonly properties: readonly EntityProperty[];
 	readonly uri: vscode.Uri;
 }
 
@@ -59,11 +59,49 @@ async function scanWorkspaceEntities(): Promise<readonly EntityInfo[]> {
 export function findEntityProperties(
 		repositoryText: string,
 		entities: readonly EntityInfo[],
-	): readonly string[] {
+	): readonly EntityProperty[] {
 	const names = extractRepositoryEntityNames(repositoryText);
 	const selected = names.length > 0
 		? entities.filter((entity) => names.includes(entity.name))
 		: entities;
 
-	return [...new Set(selected.flatMap((entity) => entity.properties))].sort();
+	const properties = new Map<string, EntityProperty>();
+	const entitiesByName = new Map(entities.map((entity) => [entity.name, entity]));
+	for (const entity of selected) {
+		addEntityProperties(entity, '', new Set(), properties, entitiesByName);
+	}
+	return [...properties.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function addEntityProperties(
+	entity: EntityInfo,
+	prefix: string,
+	ancestors: ReadonlySet<string>,
+	properties: Map<string, EntityProperty>,
+	entitiesByName: ReadonlyMap<string, EntityInfo>,
+): void {
+	if (ancestors.has(entity.name)) {
+		return;
+	}
+
+	const nextAncestors = new Set(ancestors).add(entity.name);
+	for (const property of entity.properties) {
+		const propertyName = `${prefix}${prefix ? capitalize(property.name) : property.name}`;
+		properties.set(propertyName, { name: propertyName, type: property.type });
+
+		for (const referencedEntityName of referencedEntityNames(property.type)) {
+			const referencedEntity = entitiesByName.get(referencedEntityName);
+			if (referencedEntity) {
+				addEntityProperties(referencedEntity, propertyName, nextAncestors, properties, entitiesByName);
+			}
+		}
+	}
+}
+
+function referencedEntityNames(type: string): string[] {
+	return [...type.matchAll(/\b[A-Z]\w*\b/g)].map((match) => match[0]);
+}
+
+function capitalize(value: string): string {
+	return value[0].toUpperCase() + value.slice(1);
 }
