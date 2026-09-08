@@ -2,8 +2,8 @@
   "name": "spring-jpa-autocomplete",
   "displayName": "Spring JPA Autocomplete",
   "publisher": "houssam-ouatmani",
-  "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, and query diagnostics for Java repositories.",
-  "version": "0.1.0",
+  "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, navigation, and diagnostics for Java repositories.",
+  "version": "0.2.0",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",
@@ -54,7 +54,8 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "npm run compile && node --test out/test/standaloneRunner.js"
+    "test:unit": "npm run compile && node --test out/test/standaloneRunner.js",
+    "package:check": "npm run compile && npm run lint && npm run test:unit"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

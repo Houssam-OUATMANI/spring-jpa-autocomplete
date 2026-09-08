@@ -4,6 +4,24 @@ All notable changes to the "spring-jpa-autocomplete" extension will be documente
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.2.0] - 2026-09-08
+
+### Added
+
+- Added diagnostics for extra parameters in derived query methods.
+- Added validation of properties used by `OrderBy` clauses.
+- Added inherited and nested property resolution for JPQL aliases.
+- Added chained `JOIN` alias resolution for JPQL queries.
+- Added completion ordering with properties before operators and keywords.
+- Added regression coverage for duplicate entity names, inherited properties, nested JPQL paths, and completion ordering.
+
+### Improved
+
+- Made the workspace entity index URI-aware so entities with the same class name do not overwrite each other.
+- Added a 150 ms debounce to Java diagnostics during editing.
+- Updated `F12` navigation to use inherited and nested property resolution.
+- Improved incremental index updates when documents change or are deleted.
+
 ## [0.1.0] - 2026-09-05
 
 - **Entity Model & Lombok**:

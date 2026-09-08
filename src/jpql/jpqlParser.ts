@@ -1,4 +1,5 @@
 import { EntityInfo } from '../entityModel';
+import { resolveEntityPropertyPath } from '../entityDiscovery';
 
 export interface JpqlQueryInfo {
 	readonly rawQuery: string;
@@ -110,24 +111,24 @@ function resolveAliases(query: string, knownEntities: readonly EntityInfo[]): Ma
 		aliases.set(alias, entityName);
 	}
 
-	// 2. JOIN alias.prop [AS] joinAlias
-	const joinMatches = query.matchAll(/\bJOIN\s+(?:FETCH\s+)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s+(?:AS\s+)?([A-Za-z_]\w*)/gi);
-	for (const m of joinMatches) {
-		const parentAlias = m[1];
-		const propName = m[2];
-		const joinAlias = m[3];
-
-		const parentEntityName = aliases.get(parentAlias);
-		if (parentEntityName) {
-			const parentEntity = entityMap.get(parentEntityName.toLowerCase());
-			const prop = parentEntity?.properties.find((p) => p.name.toLowerCase() === propName.toLowerCase());
-			if (prop) {
-				// extract target entity from type, e.g. List<Role> -> Role, or Address -> Address
-				const targetEntityMatch = prop.type.match(/\b([A-Z]\w*)\b/g);
-				const targetEntity = targetEntityMatch ? targetEntityMatch[targetEntityMatch.length - 1] : undefined;
-				if (targetEntity && entityMap.has(targetEntity.toLowerCase())) {
-					aliases.set(joinAlias, targetEntity);
-				}
+	// 2. JOIN alias.prop [AS] joinAlias. Repeat to resolve chained joins.
+	const joinMatches = [...query.matchAll(/\bJOIN\s+(?:FETCH\s+)?([A-Za-z_]\w*)\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+(?:AS\s+)?([A-Za-z_]\w*)/gi)];
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const m of joinMatches) {
+			const parentEntityName = aliases.get(m[1]);
+			const parentEntity = parentEntityName ? entityMap.get(parentEntityName.toLowerCase()) : undefined;
+			if (!parentEntity) {
+				continue;
+			}
+			const property = resolveEntityPropertyPath(parentEntity, m[2], entityMap);
+			const targetEntity = property && [...entityMap.values()].find((entity) =>
+				property.type.split(/[<>,\s]/).some((type) => type.toLowerCase() === entity.name.toLowerCase()),
+			);
+			if (targetEntity && aliases.get(m[3]) !== targetEntity.name) {
+				aliases.set(m[3], targetEntity.name);
+				changed = true;
 			}
 		}
 	}
@@ -152,7 +153,7 @@ function extractNamedParameters(query: string, baseOffset: number): { name: stri
 
 function extractPropertyAccesses(query: string, baseOffset: number): { alias: string; property: string; startOffset: number; endOffset: number }[] {
 	const results: { alias: string; property: string; startOffset: number; endOffset: number }[] = [];
-	const regex = /\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\b/g;
+	const regex = /\b([A-Za-z_]\w*)\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\b/g;
 	let match: RegExpExecArray | null;
 	while ((match = regex.exec(query)) !== null) {
 		const alias = match[1];

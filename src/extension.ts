@@ -15,6 +15,7 @@ export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers'
 export function activate(context: vscode.ExtensionContext) {
 	const entityIndex = WorkspaceEntityIndex.getInstance();
 	void entityIndex.ensureInitialized();
+	const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 	// Incremental file watcher for Java files
 	const watcher = vscode.workspace.createFileSystemWatcher('**/*.java');
@@ -22,6 +23,7 @@ export function activate(context: vscode.ExtensionContext) {
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
 			entityIndex.updateDocument(doc);
+			scheduleJavaDiagnostics(doc);
 		} catch {
 			// ignore
 		}
@@ -30,6 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
 			entityIndex.updateDocument(doc);
+			scheduleJavaDiagnostics(doc);
 		} catch {
 			// ignore
 		}
@@ -182,8 +185,26 @@ export function activate(context: vscode.ExtensionContext) {
 		diagnostics.set(document.uri, documentDiagnostics);
 	};
 
+	const scheduleJavaDiagnostics = (document: vscode.TextDocument) => {
+		if (document.languageId !== 'java') {
+			return;
+		}
+		const key = document.uri.toString();
+		const existingTimer = diagnosticTimers.get(key);
+		if (existingTimer) {
+			clearTimeout(existingTimer);
+		}
+		diagnosticTimers.set(key, setTimeout(() => {
+			diagnosticTimers.delete(key);
+			void refreshJavaDiagnostics(document);
+		}, 150));
+	};
+
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(refreshJavaDiagnostics));
-	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => refreshJavaDiagnostics(document)));
+	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
+		entityIndex.updateDocument(document);
+		scheduleJavaDiagnostics(document);
+	}));
 	context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
 		if (document.languageId === 'java') {
 			entityIndex.updateDocument(document);
@@ -194,6 +215,15 @@ export function activate(context: vscode.ExtensionContext) {
 	for (const document of vscode.workspace.textDocuments) {
 		void refreshJavaDiagnostics(document);
 	}
+
+	context.subscriptions.push({
+		dispose: () => {
+			for (const timer of diagnosticTimers.values()) {
+				clearTimeout(timer);
+			}
+			diagnosticTimers.clear();
+		},
+	});
 }
 
 function parseMethodParameters(paramsText: string): { name: string; type: string }[] {

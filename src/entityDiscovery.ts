@@ -42,26 +42,18 @@ export class WorkspaceEntityIndex {
 		}
 		const entity = parseEntityModel(document.getText(), document.uri);
 		const uriKey = document.uri.toString();
+		this.entitiesByUri.delete(uriKey);
 		if (entity) {
 			this.entitiesByUri.set(uriKey, entity);
-			this.entitiesByName.set(entity.name, entity);
-		} else {
-			const existing = this.entitiesByUri.get(uriKey);
-			if (existing) {
-				this.entitiesByName.delete(existing.name);
-				this.entitiesByUri.delete(uriKey);
-			}
 		}
+		this.rebuildNameIndex();
 		return entity;
 	}
 
 	public removeUri(uri: vscode.Uri): void {
 		const uriKey = uri.toString();
-		const existing = this.entitiesByUri.get(uriKey);
-		if (existing) {
-			this.entitiesByName.delete(existing.name);
-			this.entitiesByUri.delete(uriKey);
-		}
+		this.entitiesByUri.delete(uriKey);
+		this.rebuildNameIndex();
 	}
 
 	public getEntity(name: string): EntityInfo | undefined {
@@ -69,7 +61,7 @@ export class WorkspaceEntityIndex {
 	}
 
 	public getAllEntities(): readonly EntityInfo[] {
-		return [...this.entitiesByName.values()];
+		return [...this.entitiesByUri.values()];
 	}
 
 	private async scanWorkspace(): Promise<void> {
@@ -88,7 +80,17 @@ export class WorkspaceEntityIndex {
 				}
 			}
 		} finally {
+			this.rebuildNameIndex();
 			this.isInitialized = true;
+		}
+	}
+
+	private rebuildNameIndex(): void {
+		this.entitiesByName.clear();
+		for (const entity of this.entitiesByUri.values()) {
+			if (!this.entitiesByName.has(entity.name)) {
+				this.entitiesByName.set(entity.name, entity);
+			}
 		}
 	}
 }
@@ -155,7 +157,7 @@ export function resolveEntityHierarchy(
 	}
 
 	visited.add(entity.name);
-	const superEntity = entitiesByName.get(entity.superclassName);
+	const superEntity = findEntityByName(entitiesByName, entity.superclassName);
 	if (!superEntity) {
 		return entity;
 	}
@@ -223,6 +225,33 @@ function addEntityProperties(
 
 export function referencedEntityNames(type: string): string[] {
 	return [...type.matchAll(/\b[A-Z]\w*\b/g)].map((match) => match[0]);
+}
+
+export function resolveEntityPropertyPath(
+	entity: EntityInfo,
+	propertyPath: string,
+	entitiesByName: ReadonlyMap<string, EntityInfo>,
+): EntityProperty | undefined {
+	let currentEntity = entity;
+	let resolved: EntityProperty | undefined;
+
+	for (const segment of propertyPath.split('.')) {
+		const current = resolveEntityHierarchy(currentEntity, entitiesByName);
+		resolved = current.properties.find((property) => property.name.toLowerCase() === segment.toLowerCase());
+		if (!resolved) {
+			return undefined;
+		}
+		const nextEntityName = referencedEntityNames(resolved.type).find((name) => findEntityByName(entitiesByName, name));
+		if (nextEntityName) {
+			currentEntity = findEntityByName(entitiesByName, nextEntityName)!;
+		}
+	}
+
+	return resolved;
+}
+
+function findEntityByName(entitiesByName: ReadonlyMap<string, EntityInfo>, name: string): EntityInfo | undefined {
+	return entitiesByName.get(name) ?? [...entitiesByName.values()].find((entity) => entity.name.toLowerCase() === name.toLowerCase());
 }
 
 function capitalize(value: string): string {

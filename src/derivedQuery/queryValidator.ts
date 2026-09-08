@@ -15,7 +15,7 @@ export interface DerivedMethodValidationDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code?: 'INVALID_RETURN_TYPE' | 'MISSING_PARAMETER' | 'UNKNOWN_PROPERTY' | 'MISSING_PAGEABLE';
+	readonly code?: 'INVALID_RETURN_TYPE' | 'MISSING_PARAMETER' | 'EXTRA_PARAMETER' | 'UNKNOWN_PROPERTY' | 'MISSING_PAGEABLE';
 	readonly expectedReturnType?: string;
 	readonly missingParam?: { name: string; type: string };
 }
@@ -51,6 +51,18 @@ export function validateDerivedMethodSignature(
 				severity: 'error',
 				startOffset: start,
 				endOffset: end,
+				code: 'UNKNOWN_PROPERTY',
+			});
+		}
+	}
+	for (const order of parsed.orderBy) {
+		if (!findProperty(order.propertyName, propMap)) {
+			const start = signature.startOffset + signature.rawText.indexOf(signature.methodName) + signature.methodName.indexOf(order.propertyName);
+			diagnostics.push({
+				message: `Unknown entity property '${order.propertyName}' in OrderBy clause.`,
+				severity: 'error',
+				startOffset: start,
+				endOffset: start + order.propertyName.length,
 				code: 'UNKNOWN_PROPERTY',
 			});
 		}
@@ -172,6 +184,16 @@ function validateParameters(
 			endOffset: end,
 			code: 'MISSING_PARAMETER',
 			missingParam: nextExpected ? { name: nextExpected.name, type: nextExpected.type } : undefined,
+		});
+	} else if (normalParams.length > expected.length) {
+		const methodOffsetInSig = signature.rawText.indexOf(signature.methodName);
+		const start = signature.startOffset + methodOffsetInSig;
+		diagnostics.push({
+			message: `Derived query method '${signature.methodName}' expects ${expected.length} parameter(s), but found ${normalParams.length}.`,
+			severity: 'error',
+			startOffset: start,
+			endOffset: start + signature.methodName.length,
+			code: 'EXTRA_PARAMETER',
 		});
 	}
 

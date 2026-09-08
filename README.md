@@ -1,6 +1,6 @@
 # Spring JPA Autocomplete
 
-Focused Spring Data JPA assistance for Java repositories in VS Code. Get completions for derived queries, related entity properties, and JPQL `@Query` expressions, with diagnostics for common mistakes.
+VS Code assistance for Spring Data JPA repositories: derived-query completion, JPQL completion, diagnostics, quick-fixes, and navigation for Java projects.
 
 ## Installation
 
@@ -8,20 +8,25 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
 
 ## Features
 
-- **Derived query completions**: `findBy`, `countBy`, `existsBy`, `deleteBy`, etc. with modifiers (`Distinct`, `Top`, `First`).
+- **Derived query completions**: `findBy`, `countBy`, `existsBy`, `deleteBy`, etc. with modifiers (`Distinct`, `Top`, `First`), predicates, operators, connectors, and `OrderBy`.
+- **Completion ordering**: entity properties are displayed before operators and keywords.
 - **Entity & Property model**:
   - Support for `@Entity`, `@MappedSuperclass` inheritance, `@Embeddable`, and Java records.
   - Automatic property detection for Lombok `@Data`, `@Getter`, `@Value`.
   - Exclusion of `@Transient` fields and `transient` keyword.
   - Nested property suggestions with both camelCase (`AddressCity`) and underscore (`Address_City`) navigation.
+  - Inherited and nested property resolution across related entities.
+  - URI-aware workspace indexing so same-named entities do not overwrite each other.
 - **Derived query validation**:
   - Validates property existence against the repository's entity.
   - Return type validation (`existsBy` must return `boolean`, `countBy` must return numeric `long`/`int`).
   - Parameter validation: flags missing or extra method parameters and missing `Pageable` on `Page` return types.
+  - `OrderBy` property validation.
 - **Advanced JPQL support**:
   - Single-line and multi-line Java 15+ Text Blocks (`""" SELECT ... """`).
-  - Table and alias resolution for `FROM ... JOIN ...` clauses (e.g. `JOIN u.roles r`).
-  - Alias property completion (`u.` and `r.`) and parameter completion (`:`).
+  - Table and alias resolution for `FROM ... JOIN ...` clauses, including chained joins.
+  - Alias property completion (`u.` and `r.`), nested paths (`u.address.city`), and parameter completion (`:`).
+  - Inherited property resolution in JPQL aliases.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
 - **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
   - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
@@ -33,6 +38,7 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
   - Add `@Param` annotation to method parameter.
   - Add `Pageable` parameter when returning `Page<T>`.
 - **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.
+- **Debounced diagnostics**: Java diagnostics are delayed briefly while typing to avoid repeated analysis.
 
 ## Usage
 
@@ -56,15 +62,22 @@ List<Order> findByUserEmail(@Param("userEmail") String userEmail);
 
 Press `Ctrl+Click` on any property to navigate directly to its definition in the entity, or `Alt+Enter` on warnings/errors to apply Quick-Fixes.
 
-### 0.0.2 - 2026-09-05
+## Development
 
-- Added completion for related entity properties such as `findByAddressCity`.
-- Added diagnostics for unknown derived-query properties.
-- Added JPQL `@Query` validation for entities, properties, and named parameters.
-- Added JPQL property completion after an alias such as `u.`.
-- Fixed completion replacement so a partial prefix such as `ex` becomes `existsBy` instead of being appended.
-- Improved completion metadata and field/property icons.
+```bash
+npm install
+npm run compile
+npm run lint
+npm run test:unit
+```
 
-### 0.0.1 - 2026-09-05
+Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-- Initial release with Spring Data JPA keyword and entity property completion.
+## Requirements
+
+- VS Code `1.136.0` or later.
+- A Java project containing Spring Data JPA repositories and entity classes.
+
+## License
+
+MIT

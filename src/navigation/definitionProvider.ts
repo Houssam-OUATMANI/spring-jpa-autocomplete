@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { WorkspaceEntityIndex } from '../entityDiscovery';
+import { findEntityProperties, resolveEntityPropertyPath, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 
@@ -62,9 +62,7 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 				if (entityName) {
 					const entity = entityMap.get(entityName.toLowerCase());
 					if (entity) {
-						const prop = entity.properties.find(
-							(p) => p.name.toLowerCase() === propAccess.property.toLowerCase(),
-						);
+						const prop = resolveEntityPropertyPath(entity, propAccess.property, entityMap);
 						if (prop && prop.location) {
 							return new vscode.Location(
 								entity.uri,
@@ -103,7 +101,8 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 				if (predicate) {
 					// Match property in target entity
 					const cleanedPropName = predicate.propertyName.replace(/_/g, '').toLowerCase();
-					const prop = targetEntity.properties.find(
+					const accessibleProperties = findEntityProperties(docText, entities);
+					const prop = accessibleProperties.find(
 						(p) => p.name.replace(/_/g, '').toLowerCase() === cleanedPropName,
 					);
 					if (prop && prop.location) {

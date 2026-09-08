@@ -43,6 +43,7 @@ export function createDerivedQueryCompletions(
 				const label = `${toPascalCase(prop.name)}${dir}`;
 				const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Property);
 				item.detail = `Sort by ${prop.name} (${dir === 'Asc' ? 'Ascending' : 'Descending'})`;
+				item.sortText = `0_${label}`;
 				item.range = range;
 				items.push(item);
 			}
@@ -70,6 +71,7 @@ export function createDerivedQueryCompletions(
 			if (conn.toLowerCase().startsWith(afterProp.toLowerCase())) {
 				const item = new vscode.CompletionItem(conn, vscode.CompletionItemKind.Keyword);
 				item.detail = `Spring Data JPA ${conn}`;
+				item.sortText = `1_${conn}`;
 				item.range = new vscode.Range(new vscode.Position(position.line, position.character - afterProp.length), position);
 				items.push(item);
 			}
@@ -80,6 +82,7 @@ export function createDerivedQueryCompletions(
 			if (op.toLowerCase().startsWith(afterProp.toLowerCase())) {
 				const item = new vscode.CompletionItem(op, vscode.CompletionItemKind.Operator);
 				item.detail = `Spring Data JPA Operator: ${op}`;
+				item.sortText = `2_${op}`;
 				item.range = new vscode.Range(new vscode.Position(position.line, position.character - afterProp.length), position);
 				items.push(item);
 			}
@@ -94,6 +97,7 @@ export function createDerivedQueryCompletions(
 		if (partial.length === 0 || pascal.toLowerCase().startsWith(partial.toLowerCase())) {
 			const item = new vscode.CompletionItem(pascal, vscode.CompletionItemKind.Field);
 			item.detail = `Entity property: ${prop.type}`;
+			item.sortText = `0_${pascal}`;
 			item.range = propRange;
 			items.push(item);
 		}

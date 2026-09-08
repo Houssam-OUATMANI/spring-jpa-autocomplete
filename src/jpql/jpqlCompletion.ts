@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { EntityInfo } from '../entityModel';
+import { resolveEntityHierarchy } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
 
 const JPQL_KEYWORDS = [
@@ -59,10 +60,12 @@ export function createJpqlCompletions(
 			: entities[0]; // fallback to first entity if only 1
 
 		if (targetEntity) {
-			for (const prop of targetEntity.properties) {
+			const resolvedTarget = resolveEntityHierarchy(targetEntity, new Map(entities.map((entity) => [entity.name, entity])));
+			for (const prop of resolvedTarget.properties) {
 				if (!partial || prop.name.toLowerCase().startsWith(partial.toLowerCase())) {
 					const item = new vscode.CompletionItem(prop.name, vscode.CompletionItemKind.Field);
 					item.detail = `${targetEntity.name}.${prop.name} : ${prop.type}`;
+					item.sortText = `0_${prop.name}`;
 					item.range = replaceRange;
 					items.push(item);
 				}
@@ -83,6 +86,7 @@ export function createJpqlCompletions(
 			if (!partial || paramName.toLowerCase().startsWith(partial.toLowerCase())) {
 				const item = new vscode.CompletionItem(paramName, vscode.CompletionItemKind.Variable);
 				item.detail = `Method parameter: ${param.type} ${paramName}`;
+				item.sortText = `0_${paramName}`;
 				item.range = replaceRange;
 				items.push(item);
 			}
@@ -101,6 +105,7 @@ export function createJpqlCompletions(
 			if (!partial || entity.name.toLowerCase().startsWith(partial.toLowerCase())) {
 				const item = new vscode.CompletionItem(entity.name, vscode.CompletionItemKind.Class);
 				item.detail = `JPA Entity: ${entity.name}`;
+				item.sortText = `1_${entity.name}`;
 				item.range = replaceRange;
 				items.push(item);
 			}
@@ -117,6 +122,7 @@ export function createJpqlCompletions(
 			if (kw.toLowerCase().startsWith(lastWord.toLowerCase())) {
 				const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
 				item.detail = `JPQL keyword: ${kw}`;
+				item.sortText = `2_${kw}`;
 				item.range = wordRange;
 				items.push(item);
 			}

@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, WorkspaceEntityIndex } from '../entityDiscovery';
+import { extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel } from '../entityModel';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
@@ -11,6 +11,7 @@ import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { validateJpql } from '../jpql/jpqlValidator';
 import { SpringJpaCodeActionProvider } from '../actions/codeActionProvider';
 import { SpringJpaDefinitionProvider } from '../navigation/definitionProvider';
+import { createDerivedQueryCompletions } from '../derivedQuery/queryCompletion';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -236,6 +237,20 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(diags[0].code, 'MISSING_PAGEABLE');
 	});
 
+	test('flags extra parameters and unknown OrderBy properties', () => {
+		const diags = validateDerivedMethodSignature({
+			rawText: 'List<User> findByEmailOrderByUnknownAsc(String email, String extra);',
+			returnType: 'List<User>',
+			methodName: 'findByEmailOrderByUnknownAsc',
+			parameters: [{ name: 'email', type: 'String' }, { name: 'extra', type: 'String' }],
+			startOffset: 0,
+			endOffset: 69,
+		}, [{ name: 'email', type: 'String' }]);
+
+		assert.ok(diags.some((diagnostic) => diagnostic.code === 'UNKNOWN_PROPERTY'));
+		assert.ok(diags.some((diagnostic) => diagnostic.code === 'EXTRA_PARAMETER'));
+	});
+
 	// ==========================================
 	// 5. Moteur JPQL avancé: Text Blocks, multi-lignes, alias JOIN, paramètres
 	// ==========================================
@@ -285,6 +300,37 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(queries.length, 1);
 		const diags = validateJpql(queries[0], [userEntity]);
 		assert.ok(diags.some((d) => d.code === 'UNKNOWN_PROPERTY' && d.message.includes('nonExistentProp')));
+	});
+
+	test('resolves inherited and nested JPQL properties', () => {
+		const base = parseEntityModel('@MappedSuperclass class Audited { private String tenantId; }', vscode.Uri.parse('file:///Audited.java'))!;
+		const address = parseEntityModel('@Entity class Address { private String city; }', vscode.Uri.parse('file:///Address.java'))!;
+		const user = parseEntityModel('@Entity class User extends Audited { private Address address; }', vscode.Uri.parse('file:///User.java'))!;
+		const entities = [base, address, user];
+		const entityMap = new Map(entities.map((entity) => [entity.name.toLowerCase(), entity]));
+		const query = extractAllJpqlQueries('@Query("SELECT u FROM User u WHERE u.address.city = :city AND u.tenantId = :tenant") User find(@Param("city") String city, @Param("tenant") String tenant);', entities)[0];
+
+		assert.ok(resolveEntityPropertyPath(user, 'address.city', entityMap));
+		assert.ok(resolveEntityPropertyPath(user, 'tenantId', entityMap));
+		assert.deepStrictEqual(validateJpql(query, entities), []);
+	});
+
+	test('keeps same-named entities from different URIs indexed independently', () => {
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear();
+		index.updateDocument({ languageId: 'java', uri: vscode.Uri.parse('file:///one/User.java'), getText: () => '@Entity class User { String first; }' } as any);
+		index.updateDocument({ languageId: 'java', uri: vscode.Uri.parse('file:///two/User.java'), getText: () => '@Entity class User { String second; }' } as any);
+		assert.strictEqual(index.getAllEntities().length, 2);
+		index.removeUri(vscode.Uri.parse('file:///two/User.java'));
+		assert.strictEqual(index.getAllEntities().length, 1);
+		assert.strictEqual(index.getAllEntities()[0].properties[0].name, 'first');
+		index.clear();
+	});
+
+	test('prioritizes derived property suggestions over operators', () => {
+		const items = createDerivedQueryCompletions('List<User> findByE', [{ name: 'email', type: 'String' }], new vscode.Position(0, 19));
+		assert.ok(items.length > 0);
+		assert.strictEqual(items[0].sortText, '0_Email');
 	});
 
 	// ==========================================

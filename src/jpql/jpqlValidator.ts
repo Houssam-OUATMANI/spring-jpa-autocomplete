@@ -1,5 +1,6 @@
 import { EntityInfo } from '../entityModel';
 import { JpqlQueryInfo } from './jpqlParser';
+import { resolveEntityPropertyPath } from '../entityDiscovery';
 
 export interface JpqlDiagnostic {
 	readonly message: string;
@@ -39,9 +40,7 @@ export function validateJpql(
 			if (targetEntityName) {
 				const entity = entityMap.get(targetEntityName.toLowerCase());
 				if (entity) {
-					const hasProp = entity.properties.some(
-						(p) => p.name.toLowerCase() === propAccess.property.toLowerCase(),
-					);
+					const hasProp = resolveEntityPropertyPath(entity, propAccess.property, entityMap) !== undefined;
 					if (!hasProp) {
 						diagnostics.push({
 							message: `Unknown property '${propAccess.property}' on entity '${entity.name}'.`,
