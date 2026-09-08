@@ -12,6 +12,8 @@ import { validateJpql } from '../jpql/jpqlValidator';
 import { SpringJpaCodeActionProvider } from '../actions/codeActionProvider';
 import { SpringJpaDefinitionProvider } from '../navigation/definitionProvider';
 import { createDerivedQueryCompletions } from '../derivedQuery/queryCompletion';
+import { findClosestProperty } from '../propertySuggestions';
+import { generateRepositoryMethod } from '../repositoryGenerator';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -135,6 +137,20 @@ suite('Extension Test Suite', () => {
 		]);
 	});
 
+	test('prefers the repository package when entities share a simple name', () => {
+		const first = parseEntityModel('package com.first; @Entity class User { String first; }', vscode.Uri.parse('file:///first/User.java'))!;
+		const second = parseEntityModel('package com.second; @Entity class User { String second; }', vscode.Uri.parse('file:///second/User.java'))!;
+		const properties = findEntityProperties('package com.second; interface UserRepository extends JpaRepository<User, Long> {}', [first, second]);
+		assert.deepStrictEqual(properties.map((property) => property.name), ['second']);
+	});
+
+	test('recognizes projection interfaces and suggests close property names', () => {
+		const projection = parseEntityModel('package com.example; public interface UserView { String getEmail(); }', vscode.Uri.parse('file:///UserView.java'))!;
+		assert.strictEqual(projection.isProjection, true);
+		assert.deepStrictEqual(projection.properties.map((property) => property.name), ['email']);
+		assert.strictEqual(findClosestProperty('emali', ['id', 'email', 'name']), 'email');
+	});
+
 	test('expands properties from related entities with camelCase and underscore', () => {
 		const address = { name: 'Address', properties: [{ name: 'city', type: 'String' }], uri: vscode.Uri.parse('file:///Address.java') };
 		const user = { name: 'User', properties: [{ name: 'address', type: 'Address' }], uri: vscode.Uri.parse('file:///User.java') };
@@ -249,6 +265,18 @@ suite('Extension Test Suite', () => {
 
 		assert.ok(diags.some((diagnostic) => diagnostic.code === 'UNKNOWN_PROPERTY'));
 		assert.ok(diags.some((diagnostic) => diagnostic.code === 'EXTRA_PARAMETER'));
+	});
+
+	test('flags an incompatible derived query parameter type', () => {
+		const diags = validateDerivedMethodSignature({
+			rawText: 'List<User> findByEmail(Long email);',
+			returnType: 'List<User>',
+			methodName: 'findByEmail',
+			parameters: [{ name: 'email', type: 'Long' }],
+			startOffset: 0,
+			endOffset: 35,
+		}, [{ name: 'email', type: 'String' }]);
+		assert.ok(diags.some((diagnostic) => diagnostic.code === 'INVALID_PARAMETER_TYPE'));
 	});
 
 	// ==========================================
@@ -374,6 +402,11 @@ suite('Extension Test Suite', () => {
 		const actions = provider.provideCodeActions(doc, diagnostic.range, { diagnostics: [diagnostic] } as any, {} as any);
 		assert.strictEqual(actions.length, 1);
 		assert.strictEqual(actions[0].title, "Add parameter 'boolean active' to method signature");
+	});
+
+	test('generates repository methods with the expected Spring Data signature', () => {
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find' }), 'Optional<User> findByEmail(String email);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'active', propertyType: 'boolean', kind: 'exists' }), 'boolean existsByActive(boolean active);');
 	});
 
 	// ==========================================

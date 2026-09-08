@@ -4,6 +4,7 @@ import { EntityInfo, EntityProperty, parseEntityModel, PropertyLocation } from '
 export { EntityInfo, EntityProperty, PropertyLocation };
 
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/g;
+const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 
 export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
@@ -66,7 +67,13 @@ export class WorkspaceEntityIndex {
 
 	private async scanWorkspace(): Promise<void> {
 		try {
-			const files = await vscode.workspace.findFiles('**/*.java', '**/{node_modules,target,build,out,.gradle}/**');
+			const includeTestSources = typeof vscode.workspace.getConfiguration !== 'undefined'
+				? vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true)
+				: true;
+			const excluded = includeTestSources
+				? '**/{node_modules,target,build,out,.gradle}/**'
+				: '**/{node_modules,target,build,out,.gradle,src/test}/**';
+			const files = await vscode.workspace.findFiles('**/*.java', excluded);
 			for (const uri of files) {
 				try {
 					const document = await vscode.workspace.openTextDocument(uri);
@@ -129,9 +136,14 @@ export function findEntityProperties(
 	entities: readonly EntityInfo[],
 ): readonly EntityProperty[] {
 	const names = extractRepositoryEntityNames(repositoryText);
-	const selected = names.length > 0
+	const repositoryPackage = repositoryText.match(PACKAGE_DECLARATION)?.[1];
+	const namedEntities = names.length > 0
 		? entities.filter((entity) => names.includes(entity.name))
 		: entities;
+	const samePackage = repositoryPackage
+		? namedEntities.filter((entity) => entity.packageName === repositoryPackage)
+		: [];
+	const selected = samePackage.length > 0 ? samePackage : namedEntities;
 
 	const properties = new Map<string, EntityProperty>();
 	const entitiesByName = new Map(entities.map((entity) => [entity.name, entity]));

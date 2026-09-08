@@ -28,7 +28,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 
 	// Match @Query(...) including text blocks """...""" or single/multi-line "..."
 	// Also detect nativeQuery = true
-	const queryAnnotationRegex = /@Query\s*\(([\s\S]*?)\)\s*(?:@\w+(?:\([\s\S]*?\))?\s*)*\b([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/g;
+	const queryAnnotationRegex = /@Query\s*(((?:\("""[\s\S]*?"""\)|"(?:\\.|[^"\\])*"|[^)])*))\)\s*(?:@\w+(?:\([\s\S]*?\))?\s*)*\b([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/g;
 
 	let match: RegExpExecArray | null;
 	while ((match = queryAnnotationRegex.exec(documentText)) !== null) {

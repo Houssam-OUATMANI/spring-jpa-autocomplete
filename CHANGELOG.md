@@ -4,6 +4,25 @@ All notable changes to the "spring-jpa-autocomplete" extension will be documente
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.3.0] - 2026-09-08
+
+### Added
+
+- Added package-aware entity resolution for repositories and entities that share the same simple class name.
+- Added Spring Data projection interface discovery through `getX()`, `isX()`, and `hasX()` accessors.
+- Added derived-query parameter type validation, including collection parameters for `In` and `NotIn`.
+- Added close-property suggestions for unknown derived-query and JPQL properties.
+- Added the `Spring JPA: Generate Repository Method` command for `findBy`, `existsBy`, and `deleteBy` methods.
+- Added the `Spring JPA: Rebuild Entity Index` command.
+- Added automatic imports for generated `Optional`, `@Param`, and `Pageable` declarations.
+- Added VS Code settings for diagnostic debounce, performance logging, and test-source indexing.
+
+### Improved
+
+- Improved `@Query` extraction for JPQL expressions containing parentheses, such as `COALESCE` and `CONCAT`.
+- Improved generated repository method signatures and entity-property selection.
+- Added regression tests covering package collisions, projections, type validation, typo suggestions, and method generation.
+
 ## [0.2.0] - 2026-09-08
 
 ### Added

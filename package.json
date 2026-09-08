@@ -3,7 +3,7 @@
   "displayName": "Spring JPA Autocomplete",
   "publisher": "houssam-ouatmani",
   "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, navigation, and diagnostics for Java repositories.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",
@@ -45,7 +45,37 @@
   "license": "MIT",
   "main": "./out/extension.js",
   "contributes": {
-    "commands": []
+    "commands": [
+      {
+        "command": "springJpa.rebuildIndex",
+        "title": "Spring JPA: Rebuild Entity Index"
+      },
+      {
+        "command": "springJpa.generateRepositoryMethod",
+        "title": "Spring JPA: Generate Repository Method"
+      }
+    ],
+    "configuration": {
+      "title": "Spring JPA Autocomplete",
+      "properties": {
+        "springJpa.diagnosticDebounceMs": {
+          "type": "number",
+          "default": 150,
+          "minimum": 0,
+          "description": "Delay before Spring JPA diagnostics are recomputed after an edit."
+        },
+        "springJpa.enablePerformanceDiagnostics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log Spring JPA indexing and diagnostic timings to the output channel."
+        },
+        "springJpa.includeTestSources": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include Java test sources when building the entity index."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

@@ -1,5 +1,6 @@
 import { EntityProperty } from '../entityModel';
 import { parseDerivedMethodName, ParsedDerivedMethod, ParsedPredicate } from './queryParser';
+import { findClosestProperty } from '../propertySuggestions';
 
 export interface MethodSignatureInfo {
 	readonly rawText: string;
@@ -15,7 +16,7 @@ export interface DerivedMethodValidationDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code?: 'INVALID_RETURN_TYPE' | 'MISSING_PARAMETER' | 'EXTRA_PARAMETER' | 'UNKNOWN_PROPERTY' | 'MISSING_PAGEABLE';
+	readonly code?: 'INVALID_RETURN_TYPE' | 'MISSING_PARAMETER' | 'EXTRA_PARAMETER' | 'UNKNOWN_PROPERTY' | 'MISSING_PAGEABLE' | 'INVALID_PARAMETER_TYPE';
 	readonly expectedReturnType?: string;
 	readonly missingParam?: { name: string; type: string };
 }
@@ -46,8 +47,9 @@ export function validateDerivedMethodSignature(
 		if (!prop) {
 			const start = signature.startOffset + signature.rawText.indexOf(signature.methodName) + predicate.startOffset;
 			const end = start + predicate.propertyName.length;
+			const suggestion = findClosestProperty(predicate.propertyName, properties.map((property) => property.name));
 			diagnostics.push({
-				message: `Unknown entity property '${predicate.propertyName}' in derived query method.`,
+				message: `Unknown entity property '${predicate.propertyName}' in derived query method.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
 				severity: 'error',
 				startOffset: start,
 				endOffset: end,
@@ -58,8 +60,9 @@ export function validateDerivedMethodSignature(
 	for (const order of parsed.orderBy) {
 		if (!findProperty(order.propertyName, propMap)) {
 			const start = signature.startOffset + signature.rawText.indexOf(signature.methodName) + signature.methodName.indexOf(order.propertyName);
+			const suggestion = findClosestProperty(order.propertyName, properties.map((property) => property.name));
 			diagnostics.push({
-				message: `Unknown entity property '${order.propertyName}' in OrderBy clause.`,
+				message: `Unknown entity property '${order.propertyName}' in OrderBy clause.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
 				severity: 'error',
 				startOffset: start,
 				endOffset: start + order.propertyName.length,
@@ -197,7 +200,45 @@ function validateParameters(
 		});
 	}
 
+	const comparableCount = Math.min(normalParams.length, expected.length);
+	for (let index = 0; index < comparableCount; index++) {
+		const actual = normalizeType(normalParams[index].type);
+		const expectedType = normalizeType(expected[index].type);
+		if (!areCompatibleTypes(actual, expectedType)) {
+			const methodOffsetInSig = signature.rawText.indexOf(signature.methodName);
+			const parameterOffset = signature.rawText.indexOf(normalParams[index].name, methodOffsetInSig);
+			const start = signature.startOffset + Math.max(parameterOffset, methodOffsetInSig);
+			diagnostics.push({
+				message: `Parameter '${normalParams[index].name}' has type '${normalParams[index].type}', but property '${expected[index].name}' expects '${expected[index].type}'.`,
+				severity: 'error',
+				startOffset: start,
+				endOffset: start + normalParams[index].name.length,
+				code: 'INVALID_PARAMETER_TYPE',
+			});
+		}
+	}
+
 	return diagnostics;
+}
+
+function normalizeType(type: string): string {
+	return type.replace(/\s+/g, '').replace(/java\.lang\./g, '').replace(/java\.util\./g, '').toLowerCase();
+}
+
+function areCompatibleTypes(actual: string, expected: string): boolean {
+	if (actual === expected || actual === 'object' || expected === 'object') {
+		return true;
+	}
+	if (expected.startsWith('collection<') && /^(collection|list|set|iterable)<.+>$/.test(actual)) {
+		const actualElement = actual.slice(actual.indexOf('<') + 1, -1);
+		const expectedElement = expected.slice(expected.indexOf('<') + 1, -1);
+		return areCompatibleTypes(actualElement, expectedElement);
+	}
+	const numeric = new Set(['byte', 'short', 'int', 'long', 'float', 'double', 'integer', 'bigdecimal', 'biginteger']);
+	if (numeric.has(actual) && numeric.has(expected)) {
+		return true;
+	}
+	return false;
 }
 
 function buildPropertyLookupMap(properties: readonly EntityProperty[]): Map<string, EntityProperty> {

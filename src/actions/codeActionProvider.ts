@@ -44,6 +44,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					);
 					action.edit = new vscode.WorkspaceEdit();
 					action.edit.insert(document.uri, diagnostic.range.start, `@Param("${paramName}") `);
+					addImportIfMissing(action.edit, document, 'org.springframework.data.repository.query.Param');
 					action.diagnostics = [diagnostic];
 					action.isPreferred = true;
 					actions.push(action);
@@ -63,6 +64,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					);
 					action.edit = new vscode.WorkspaceEdit();
 					action.edit.insert(document.uri, parenPos, insertion);
+					addImportIfMissing(action.edit, document, 'org.springframework.data.domain.Pageable');
 					action.diagnostics = [diagnostic];
 					action.isPreferred = true;
 					actions.push(action);
@@ -96,4 +98,15 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 
 		return actions;
 	}
+}
+
+function addImportIfMissing(edit: vscode.WorkspaceEdit, document: vscode.TextDocument, importName: string): void {
+	const text = document.getText();
+	if (new RegExp(`\\bimport\\s+${importName.replace(/\./g, '\\.')}\\s*;`).test(text)) {
+		return;
+	}
+
+	const packageMatch = /\bpackage\s+[\w.]+\s*;/.exec(text);
+	const offset = packageMatch ? packageMatch.index + packageMatch[0].length : 0;
+	edit.insert(document.uri, document.positionAt(offset), `\n\nimport ${importName};`);
 }

@@ -9,6 +9,7 @@ import { validateJpql } from './jpql/jpqlValidator';
 import { createJpqlCompletions } from './jpql/jpqlCompletion';
 import { SpringJpaDefinitionProvider } from './navigation/definitionProvider';
 import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
+import { generateRepositoryMethod, RepositoryMethodKind } from './repositoryGenerator';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -16,6 +17,66 @@ export function activate(context: vscode.ExtensionContext) {
 	const entityIndex = WorkspaceEntityIndex.getInstance();
 	void entityIndex.ensureInitialized();
 	const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
+	const output = vscode.window.createOutputChannel('Spring JPA Autocomplete');
+	context.subscriptions.push(output);
+
+	const rebuildIndex = vscode.commands.registerCommand('springJpa.rebuildIndex', async () => {
+		const started = Date.now();
+		entityIndex.clear();
+		await entityIndex.ensureInitialized();
+		for (const document of vscode.workspace.textDocuments) {
+			if (document.languageId === 'java') {
+				await refreshJavaDiagnostics(document);
+			}
+		}
+		vscode.window.showInformationMessage(`Spring JPA index rebuilt (${entityIndex.getAllEntities().length} entities).`);
+		if (vscode.workspace.getConfiguration('springJpa').get<boolean>('enablePerformanceDiagnostics', false)) {
+			output.appendLine(`Index rebuilt in ${Date.now() - started}ms.`);
+		}
+	});
+	context.subscriptions.push(rebuildIndex);
+
+	const generateMethod = vscode.commands.registerCommand('springJpa.generateRepositoryMethod', async () => {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor || editor.document.languageId !== 'java') {
+			vscode.window.showWarningMessage('Open a Java repository to generate a method.');
+			return;
+		}
+		const repositoryMatch = editor.document.getText().match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository)\s*<\s*([A-Z]\w*)/);
+		if (!repositoryMatch) {
+			vscode.window.showWarningMessage('The active Java file is not a supported Spring Data repository.');
+			return;
+		}
+		const entities = await discoverEntities(editor.document);
+		const properties = findEntityProperties(editor.document.getText(), entities);
+		const selectedWord = editor.document.getText(editor.document.getWordRangeAtPosition(editor.selection.active) ?? new vscode.Range(editor.selection.active, editor.selection.active));
+		const property = properties.find((candidate) => candidate.name.toLowerCase() === selectedWord.toLowerCase());
+		if (!property) {
+			vscode.window.showWarningMessage('Place the cursor on an entity property.');
+			return;
+		}
+		const kind = await vscode.window.showQuickPick([
+			{ label: 'find', description: 'Generate Optional<Entity> findBy...' },
+			{ label: 'exists', description: 'Generate boolean existsBy...' },
+			{ label: 'delete', description: 'Generate void deleteBy...' },
+		], { placeHolder: 'Choose a repository method' });
+		if (!kind) {
+			return;
+		}
+		const method = generateRepositoryMethod({ entityName: repositoryMatch[1], propertyName: property.name, propertyType: property.type, kind: kind.label as RepositoryMethodKind });
+		const closeBrace = editor.document.getText().lastIndexOf('}');
+		if (closeBrace < 0) {
+			return;
+		}
+		const edit = new vscode.WorkspaceEdit();
+		edit.insert(editor.document.uri, editor.document.positionAt(closeBrace), `\n\t${method}\n`);
+		if (kind.label === 'find' && !/\bimport\s+java\.util\.Optional\s*;/.test(editor.document.getText())) {
+			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
+			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Optional;');
+		}
+		await vscode.workspace.applyEdit(edit);
+	});
+	context.subscriptions.push(generateMethod);
 
 	// Incremental file watcher for Java files
 	const watcher = vscode.workspace.createFileSystemWatcher('**/*.java');
@@ -121,6 +182,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
+		const started = Date.now();
 		const entities = await discoverEntities(document);
 		const properties = findEntityProperties(document.getText(), entities);
 		const documentDiagnostics: vscode.Diagnostic[] = [];
@@ -183,6 +245,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		diagnostics.set(document.uri, documentDiagnostics);
+		if (vscode.workspace.getConfiguration('springJpa').get<boolean>('enablePerformanceDiagnostics', false)) {
+			output.appendLine(`Diagnostics ${document.uri.toString()} computed in ${Date.now() - started}ms (${documentDiagnostics.length} findings).`);
+		}
 	};
 
 	const scheduleJavaDiagnostics = (document: vscode.TextDocument) => {
@@ -197,7 +262,7 @@ export function activate(context: vscode.ExtensionContext) {
 		diagnosticTimers.set(key, setTimeout(() => {
 			diagnosticTimers.delete(key);
 			void refreshJavaDiagnostics(document);
-		}, 150));
+		}, Math.max(0, vscode.workspace.getConfiguration('springJpa').get<number>('diagnosticDebounceMs', 150))));
 	};
 
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(refreshJavaDiagnostics));

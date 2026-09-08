@@ -1,6 +1,7 @@
 import { EntityInfo } from '../entityModel';
 import { JpqlQueryInfo } from './jpqlParser';
 import { resolveEntityPropertyPath } from '../entityDiscovery';
+import { findClosestProperty } from '../propertySuggestions';
 
 export interface JpqlDiagnostic {
 	readonly message: string;
@@ -42,8 +43,9 @@ export function validateJpql(
 				if (entity) {
 					const hasProp = resolveEntityPropertyPath(entity, propAccess.property, entityMap) !== undefined;
 					if (!hasProp) {
+						const suggestion = findClosestProperty(propAccess.property.split('.').pop() ?? propAccess.property, entity.properties.map((property) => property.name));
 						diagnostics.push({
-							message: `Unknown property '${propAccess.property}' on entity '${entity.name}'.`,
+							message: `Unknown property '${propAccess.property}' on entity '${entity.name}'.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
 							severity: 'error',
 							startOffset: propAccess.startOffset,
 							endOffset: propAccess.endOffset,

@@ -16,7 +16,9 @@ export interface EntityProperty {
 
 export interface EntityInfo {
 	readonly name: string;
+	readonly packageName?: string;
 	readonly uri: vscode.Uri;
+	readonly isProjection?: boolean;
 	readonly superclassName?: string;
 	readonly isMappedSuperclass?: boolean;
 	readonly isEmbeddable?: boolean;
@@ -30,15 +32,27 @@ const EMBEDDABLE_ANNOTATION = /@Embeddable\b/;
 const LOMBOK_DATA_OR_GETTER = /@(Data|Getter|Value)\b/;
 const RECORD_DECLARATION = /\brecord\s+([A-Z]\w*)\s*\(([\s\S]*?)\)/;
 const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A-Z]\w*))?/;
+const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 
 export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | undefined {
 	const isEntity = ENTITY_ANNOTATION.test(text);
 	const isMappedSuperclass = MAPPED_SUPERCLASS_ANNOTATION.test(text);
 	const isEmbeddable = EMBEDDABLE_ANNOTATION.test(text);
 	const recordMatch = text.match(RECORD_DECLARATION);
+	const packageName = text.match(PACKAGE_DECLARATION)?.[1];
+	const projectionMatch = text.match(/\binterface\s+([A-Z]\w*)\b[\s\S]*?\b(?:get|is|has)[A-Z]\w*\s*\(/);
 
-	if (!isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch) {
+	if (!isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch) {
 		return undefined;
+	}
+	if (projectionMatch && !isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch) {
+		return {
+			name: projectionMatch[1],
+			packageName,
+			uri,
+			isProjection: true,
+			properties: extractClassProperties(text, false),
+		};
 	}
 	if (recordMatch) {
 		const name = recordMatch[1];
@@ -46,6 +60,7 @@ export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | un
 		const properties = extractRecordProperties(paramsText, text, recordMatch.index ?? 0);
 		return {
 			name,
+			packageName,
 			uri,
 			isMappedSuperclass,
 			isEmbeddable,
@@ -65,6 +80,7 @@ export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | un
 
 	return {
 		name,
+		packageName,
 		uri,
 		superclassName,
 		isMappedSuperclass,
