@@ -94,6 +94,24 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(propNames, ['companyName', 'id', 'taxNumber']);
 	});
 
+	test('extracts JPA relation metadata and explicit target entities', () => {
+		const entity = parseEntityModel(`
+			@Entity
+			class Order {
+				@ManyToOne(targetEntity = User.class)
+				private User user;
+				@OneToMany
+				private List<Item> items;
+			}
+		`, vscode.Uri.parse('file:///Order.java'))!;
+		const user = entity.properties.find((property) => property.name === 'user');
+		const items = entity.properties.find((property) => property.name === 'items');
+		assert.strictEqual(user?.relation, 'ManyToOne');
+		assert.strictEqual(user?.targetEntity, 'User');
+		assert.strictEqual(items?.relation, 'OneToMany');
+		assert.strictEqual(items?.isCollection, true);
+	});
+
 	test('supports Java Records as JPA / projection models', () => {
 		const text = 'public record UserSummary(Long id, String username, String email) {}';
 		const entity = parseEntityModel(text, vscode.Uri.parse('file:///UserSummary.java'));
@@ -330,6 +348,21 @@ suite('Extension Test Suite', () => {
 		assert.ok(diags.some((d) => d.code === 'UNKNOWN_PROPERTY' && d.message.includes('nonExistentProp')));
 	});
 
+	test('validates JPQL selected entity against repository return type', () => {
+		const documentText = `
+			@Query("SELECT u FROM User u")
+			String findUser();
+		`;
+		const userEntity = {
+			name: 'User',
+			uri: vscode.Uri.parse('file:///User.java'),
+			properties: [{ name: 'email', type: 'String' }],
+		};
+		const query = extractAllJpqlQueries(documentText, [userEntity])[0];
+		const diagnostics = validateJpql(query, [userEntity]);
+		assert.ok(diagnostics.some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'));
+	});
+
 	test('resolves inherited and nested JPQL properties', () => {
 		const base = parseEntityModel('@MappedSuperclass class Audited { private String tenantId; }', vscode.Uri.parse('file:///Audited.java'))!;
 		const address = parseEntityModel('@Entity class Address { private String city; }', vscode.Uri.parse('file:///Address.java'))!;
@@ -407,6 +440,9 @@ suite('Extension Test Suite', () => {
 	test('generates repository methods with the expected Spring Data signature', () => {
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find' }), 'Optional<User> findByEmail(String email);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'active', propertyType: 'boolean', kind: 'exists' }), 'boolean existsByActive(boolean active);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find', operator: 'Containing' }), 'Optional<User> findByEmailContaining(String email);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'age', propertyType: 'Integer', kind: 'find', operator: 'Between' }), 'Optional<User> findByAgeBetween(Integer ageStart, Integer ageEnd);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'id', propertyType: 'Long', kind: 'exists', operator: 'In' }), 'boolean existsByIdIn(Collection<Long> id);');
 	});
 
 	// ==========================================

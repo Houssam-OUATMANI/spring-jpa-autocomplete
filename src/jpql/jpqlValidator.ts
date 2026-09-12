@@ -8,7 +8,7 @@ export interface JpqlDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION';
+	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE';
 	readonly paramName?: string;
 }
 
@@ -36,6 +36,7 @@ export function validateJpql(
 
 	// 2. Validate property accesses on aliases: alias.property
 	if (!queryInfo.isNative) {
+		validateReturnType(queryInfo, entityMap, diagnostics);
 		for (const propAccess of queryInfo.propertyAccesses) {
 			const targetEntityName = queryInfo.aliases.get(propAccess.alias);
 			if (targetEntityName) {
@@ -118,4 +119,41 @@ export function validateJpql(
 	}
 
 	return diagnostics;
+}
+
+function validateReturnType(
+	queryInfo: JpqlQueryInfo,
+	entityMap: Map<string, EntityInfo>,
+	diagnostics: JpqlDiagnostic[],
+): void {
+	if (!queryInfo.methodSignature || !queryInfo.selectedAlias) {
+		return;
+	}
+	if (!/^[A-Za-z_$][\w$]*(?:\s*<.*>)?(?:\[\])?$/.test(queryInfo.methodSignature.returnType.trim())) {
+		return;
+	}
+
+	const selectedEntityName = queryInfo.aliases.get(queryInfo.selectedAlias);
+	if (!selectedEntityName || !entityMap.has(selectedEntityName.toLowerCase())) {
+		return;
+	}
+
+	const returnType = queryInfo.methodSignature.returnType.replace(/\s+/g, '');
+	const entityName = selectedEntityName;
+	const isCollection = /^(?:List|Set|Collection|Iterable|Stream)<.+>$/.test(returnType);
+	const isOptional = returnType === `Optional<${entityName}>`;
+	const isPage = returnType === `Page<${entityName}>` || returnType === `Slice<${entityName}>`;
+	const isEntity = returnType === entityName;
+	if (isCollection || isOptional || isPage || isEntity) {
+		return;
+	}
+
+	const returnStart = queryInfo.methodSignature.startOffset + queryInfo.rawQuery.indexOf(queryInfo.methodSignature.returnType);
+	diagnostics.push({
+		message: `JPQL query selects '${entityName}', but method returns '${queryInfo.methodSignature.returnType}'.`,
+		severity: 'error',
+		startOffset: returnStart,
+		endOffset: returnStart + queryInfo.methodSignature.returnType.length,
+		code: 'INVALID_RETURN_TYPE',
+	});
 }

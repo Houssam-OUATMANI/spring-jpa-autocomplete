@@ -7,6 +7,7 @@ export interface JpqlQueryInfo {
 	readonly queryStartOffset: number; // offset in document where query string content starts
 	readonly queryEndOffset: number;
 	readonly isNative: boolean;
+	readonly selectedAlias?: string;
 	readonly aliases: ReadonlyMap<string, string>; // alias -> EntityName
 	readonly namedParameters: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly propertyAccesses: readonly { alias: string; property: string; startOffset: number; endOffset: number }[];
@@ -34,9 +35,15 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 	while ((match = queryAnnotationRegex.exec(documentText)) !== null) {
 		const fullMatch = match[0];
 		const annotationArgs = match[1];
-		const returnType = match[2].trim();
-		const methodName = match[3];
-		const paramsText = match[4];
+		let returnType = match[2].trim();
+		let methodName = match[3];
+		let paramsText = match[4];
+		const signatureMatch = fullMatch.match(/(?:^|\)\s*)(?:@[\w.]+(?:\([\s\S]*?\))?\s*)*([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;\s*$/);
+		if (signatureMatch) {
+			returnType = signatureMatch[1].trim();
+			methodName = signatureMatch[2];
+			paramsText = signatureMatch[3];
+		}
 
 		const isNative = /\bnativeQuery\s*=\s*true\b/.test(annotationArgs);
 
@@ -78,6 +85,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 
 		// Parse JPQL structure
 		const aliases = resolveAliases(queryContent, knownEntities);
+		const selectedAlias = queryContent.match(/\bSELECT\s+(?:DISTINCT\s+)?([A-Za-z_]\w*)/i)?.[1];
 		const namedParameters = extractNamedParameters(queryContent, contentStartOffset);
 		const propertyAccesses = extractPropertyAccesses(queryContent, contentStartOffset);
 		const referencedEntities = extractReferencedEntities(queryContent, contentStartOffset);
@@ -88,6 +96,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			queryStartOffset: contentStartOffset,
 			queryEndOffset,
 			isNative,
+			selectedAlias,
 			aliases,
 			namedParameters,
 			propertyAccesses,

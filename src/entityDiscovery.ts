@@ -211,6 +211,9 @@ function addEntityProperties(
 			name: camelName,
 			type: property.type,
 			isId: property.isId,
+			relation: property.relation,
+			targetEntity: property.targetEntity,
+			isCollection: property.isCollection,
 			location: property.location,
 		});
 
@@ -221,11 +224,15 @@ function addEntityProperties(
 				name: underscoreName,
 				type: property.type,
 				isId: property.isId,
+				relation: property.relation,
+				targetEntity: property.targetEntity,
+				isCollection: property.isCollection,
 				location: property.location,
 			});
 		}
 
-		for (const referencedEntityName of referencedEntityNames(property.type)) {
+		const referencedNames = property.targetEntity ? [property.targetEntity] : referencedEntityNames(property.type);
+		for (const referencedEntityName of referencedNames) {
 			const referencedEntity = entitiesByName.get(referencedEntityName);
 			if (referencedEntity) {
 				const resolvedReferenced = resolveEntityHierarchy(referencedEntity, entitiesByName);

@@ -3,7 +3,7 @@
   "displayName": "Spring JPA Autocomplete",
   "publisher": "houssam-ouatmani",
   "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, navigation, and diagnostics for Java repositories.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",
@@ -73,6 +73,11 @@
           "type": "boolean",
           "default": true,
           "description": "Include Java test sources when building the entity index."
+        },
+        "springJpa.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show entity information CodeLens entries above Spring Data repositories."
         }
       }
     }

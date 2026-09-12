@@ -11,8 +11,13 @@ export interface EntityProperty {
 	readonly type: string;
 	readonly isId?: boolean;
 	readonly isTransient?: boolean;
+	readonly relation?: JpaRelation;
+	readonly targetEntity?: string;
+	readonly isCollection?: boolean;
 	readonly location?: PropertyLocation;
 }
+
+export type JpaRelation = 'OneToOne' | 'OneToMany' | 'ManyToOne' | 'ManyToMany' | 'ElementCollection' | 'Embedded' | 'EmbeddedId';
 
 export interface EntityInfo {
 	readonly name: string;
@@ -136,6 +141,9 @@ function extractClassProperties(text: string, hasLombok: boolean): EntityPropert
 
 		// Check if id
 		const isId = annotations.includes('@Id');
+		const relation = extractRelation(annotations);
+		const targetEntity = annotations.match(/targetEntity\s*=\s*([A-Z]\w*)\.class/)?.[1];
+		const isCollection = /\b(?:Collection|List|Set|Iterable|Map)<|\[\]/.test(type);
 
 		const isStatic = fullMatch.includes('static ');
 		if (isStatic) {
@@ -150,6 +158,9 @@ function extractClassProperties(text: string, hasLombok: boolean): EntityPropert
 			type,
 			isId,
 			isTransient: false,
+			relation,
+			targetEntity,
+			isCollection,
 			location,
 		});
 	}
@@ -172,6 +183,15 @@ function extractClassProperties(text: string, hasLombok: boolean): EntityPropert
 	}
 
 	return [...properties.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function extractRelation(annotations: string): JpaRelation | undefined {
+	for (const relation of ['OneToOne', 'OneToMany', 'ManyToOne', 'ManyToMany', 'ElementCollection', 'EmbeddedId', 'Embedded'] as const) {
+		if (annotations.includes(`@${relation}`)) {
+			return relation;
+		}
+	}
+	return undefined;
 }
 
 function calculateLocation(fullText: string, offset: number, length: number): PropertyLocation {

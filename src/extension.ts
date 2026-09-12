@@ -8,8 +8,10 @@ import { extractAllJpqlQueries } from './jpql/jpqlParser';
 import { validateJpql } from './jpql/jpqlValidator';
 import { createJpqlCompletions } from './jpql/jpqlCompletion';
 import { SpringJpaDefinitionProvider } from './navigation/definitionProvider';
+import { SpringJpaHoverProvider } from './navigation/hoverProvider';
+import { SpringJpaCodeLensProvider } from './navigation/codeLensProvider';
 import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
-import { generateRepositoryMethod, RepositoryMethodKind } from './repositoryGenerator';
+import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -63,7 +65,26 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!kind) {
 			return;
 		}
-		const method = generateRepositoryMethod({ entityName: repositoryMatch[1], propertyName: property.name, propertyType: property.type, kind: kind.label as RepositoryMethodKind });
+		const operator = await vscode.window.showQuickPick([
+			{ label: 'Equals', description: 'Exact match' },
+			{ label: 'Containing', description: 'Contains text' },
+			{ label: 'StartingWith', description: 'Starts with text' },
+			{ label: 'EndingWith', description: 'Ends with text' },
+			{ label: 'In', description: 'Match a collection of values' },
+			{ label: 'Between', description: 'Match a range' },
+			{ label: 'GreaterThan', description: 'Strictly greater than' },
+			{ label: 'LessThan', description: 'Strictly less than' },
+		], { placeHolder: 'Choose a query operator' });
+		if (!operator) {
+			return;
+		}
+		const method = generateRepositoryMethod({
+			entityName: repositoryMatch[1],
+			propertyName: property.name,
+			propertyType: property.type,
+			kind: kind.label as RepositoryMethodKind,
+			operator: operator.label as RepositoryQueryOperator,
+		});
 		const closeBrace = editor.document.getText().lastIndexOf('}');
 		if (closeBrace < 0) {
 			return;
@@ -73,6 +94,10 @@ export function activate(context: vscode.ExtensionContext) {
 		if (kind.label === 'find' && !/\bimport\s+java\.util\.Optional\s*;/.test(editor.document.getText())) {
 			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
 			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Optional;');
+		}
+		if (operator.label === 'In' && !/\bimport\s+java\.util\.Collection\s*;/.test(editor.document.getText())) {
+			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
+			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Collection;');
 		}
 		await vscode.workspace.applyEdit(edit);
 	});
@@ -167,6 +192,18 @@ export function activate(context: vscode.ExtensionContext) {
 		new SpringJpaDefinitionProvider()
 	);
 	context.subscriptions.push(definitionProvider);
+
+	const hoverProvider = vscode.languages.registerHoverProvider(
+		{ language: 'java', scheme: 'file' },
+		new SpringJpaHoverProvider(),
+	);
+	context.subscriptions.push(hoverProvider);
+
+	const codeLensProvider = vscode.languages.registerCodeLensProvider(
+		{ language: 'java', scheme: 'file' },
+		new SpringJpaCodeLensProvider(),
+	);
+	context.subscriptions.push(codeLensProvider);
 
 	// 3. Code Action Provider (Quick-Fixes - Alt+Enter)
 	const codeActionProvider = vscode.languages.registerCodeActionsProvider(

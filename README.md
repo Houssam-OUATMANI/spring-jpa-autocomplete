@@ -18,6 +18,7 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
   - Nested property suggestions with both camelCase (`AddressCity`) and underscore (`Address_City`) navigation.
   - Inherited and nested property resolution across related entities.
   - URI-aware workspace indexing so same-named entities do not overwrite each other.
+  - JPA relation metadata for `@OneToOne`, `@OneToMany`, `@ManyToOne`, `@ManyToMany`, `@Embedded`, and `@EmbeddedId`.
 - **Derived query validation**:
   - Validates property existence against the repository's entity.
   - Return type validation (`existsBy` must return `boolean`, `countBy` must return numeric `long`/`int`).
@@ -31,6 +32,7 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
   - Alias property completion (`u.` and `r.`), nested paths (`u.address.city`), and parameter completion (`:`).
   - Inherited property resolution in JPQL aliases.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
+  - Basic return-type validation between the JPQL `SELECT` entity and the repository method.
 - **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
   - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
   - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
@@ -42,9 +44,13 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
   - Add `Pageable` parameter and its import when returning `Page<T>`.
 - **Repository generation**:
   - Run `Spring JPA: Generate Repository Method` with the cursor on a property to generate `findBy`, `existsBy`, or `deleteBy` methods.
+  - Choose operators such as `Containing`, `In`, `Between`, `GreaterThan`, and `LessThan`.
+- **IDE assistance**:
+  - Hover information for JPA entities, properties, and relations.
+  - CodeLens above repositories showing their managed entity and property count.
 - **Index and performance controls**:
   - Run `Spring JPA: Rebuild Entity Index` after changing project structure.
-  - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, and `springJpa.includeTestSources` in VS Code settings.
+  - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, `springJpa.includeTestSources`, and `springJpa.enableCodeLens` in VS Code settings.
 - **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.
 - **Debounced diagnostics**: Java diagnostics are delayed briefly while typing to avoid repeated analysis.
 
@@ -70,7 +76,7 @@ List<Order> findByUserEmail(@Param("userEmail") String userEmail);
 
 Press `Ctrl+Click` on any property to navigate directly to its definition in the entity, or `Alt+Enter` on warnings/errors to apply Quick-Fixes.
 
-To generate a repository method, place the cursor on an entity property in a repository file and run `Spring JPA: Generate Repository Method` from the Command Palette. Choose `find`, `exists`, or `delete`.
+To generate a repository method, place the cursor on an entity property in a repository file and run `Spring JPA: Generate Repository Method` from the Command Palette. Choose the method kind and query operator.
 
 ## Development
 
@@ -83,7 +89,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.3.0` release includes the features listed in the changelog above.
+The extension version is maintained in `package.json`. The `0.6.0` release includes the features listed in the changelog above.
 
 ## Requirements
 

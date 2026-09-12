@@ -4,6 +4,16 @@ All notable changes to the "spring-jpa-autocomplete" extension will be documente
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.4.0] - 2026-09-13
+
+### Added
+
+- Added configurable repository CodeLens entries and JPA entity/property hover information.
+- Added configurable repository method generation for common operators, including `Containing`, `In`, and `Between`.
+- Added regression tests for relation extraction, JPQL return validation, and generated operators.
+- Added basic JPQL return-type diagnostics for entity, collection, `Optional`, `Page`, and `Slice` results.
+- Added JPA relation metadata for common relationship annotations and explicit `targetEntity` support.
+
 ## [0.3.0] - 2026-09-08
 
 ### Added
