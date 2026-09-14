@@ -1,5 +1,5 @@
-export type RepositoryMethodKind = 'find' | 'exists' | 'delete';
-export type RepositoryQueryOperator = 'Equals' | 'Containing' | 'StartingWith' | 'EndingWith' | 'In' | 'Between' | 'GreaterThan' | 'LessThan';
+export type RepositoryMethodKind = 'find' | 'read' | 'get' | 'query' | 'search' | 'stream' | 'count' | 'exists' | 'delete' | 'remove';
+export type RepositoryQueryOperator = 'Equals' | 'Containing' | 'StartingWith' | 'EndingWith' | 'In' | 'NotIn' | 'Between' | 'GreaterThan' | 'LessThan' | 'IsNull' | 'IsNotNull' | 'True' | 'False';
 
 export interface RepositoryMethodGenerationInput {
 	readonly entityName: string;
@@ -14,16 +14,32 @@ export function generateRepositoryMethod(input: RepositoryMethodGenerationInput)
 	const suffix = capitalize(input.propertyName);
 	const operator = input.operator && input.operator !== 'Equals' ? input.operator : '';
 	const methodSuffix = `${suffix}${operator}`;
-	const parameterType = input.operator === 'In' ? `Collection<${input.propertyType}>` : input.propertyType;
-	const parameter = input.operator === 'Between'
+	const parameterType = input.operator === 'In' || input.operator === 'NotIn' ? `Collection<${input.propertyType}>` : input.propertyType;
+	const parameter = ['IsNull', 'IsNotNull', 'True', 'False'].includes(input.operator ?? '')
+		? ''
+		: input.operator === 'Between'
 		? `${input.propertyType} ${input.propertyName}Start, ${input.propertyType} ${input.propertyName}End`
 		: `${parameterType} ${input.propertyName}`;
 
 	switch (input.kind) {
 		case 'exists':
 			return `boolean existsBy${methodSuffix}(${parameter});`;
+		case 'count':
+			return `long countBy${methodSuffix}(${parameter});`;
 		case 'delete':
 			return `void deleteBy${methodSuffix}(${parameter});`;
+		case 'remove':
+			return `void removeBy${methodSuffix}(${parameter});`;
+		case 'stream':
+			return `Stream<${input.entityName}> streamBy${methodSuffix}(${parameter});`;
+		case 'read':
+			return `${input.returnType ?? `Optional<${input.entityName}>`} readBy${methodSuffix}(${parameter});`;
+		case 'get':
+			return `${input.returnType ?? `Optional<${input.entityName}>`} getBy${methodSuffix}(${parameter});`;
+		case 'query':
+			return `${input.returnType ?? `Optional<${input.entityName}>`} queryBy${methodSuffix}(${parameter});`;
+		case 'search':
+			return `${input.returnType ?? `Optional<${input.entityName}>`} searchBy${methodSuffix}(${parameter});`;
 		default:
 			return `${input.returnType ?? `Optional<${input.entityName}>`} findBy${methodSuffix}(${parameter});`;
 	}

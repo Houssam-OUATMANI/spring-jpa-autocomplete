@@ -1,8 +1,24 @@
 # Change Log
 
-All notable changes to the "spring-jpa-autocomplete" extension will be documented in this file.
+All notable changes to the "Spring Data JPA Tools" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+
+## [0.5.0] - 2026-09-14
+
+### Added
+
+- Added generation for `readBy`, `getBy`, `queryBy`, `searchBy`, `streamBy`, `countBy`, and `removeBy` methods.
+- Added generation for `NotIn`, null, and boolean predicates.
+- Added quick fixes for close matches to unknown derived-query properties.
+- Added regression coverage for three-predicate queries such as `findByEmailOrFirstnameOrLastname`.
+
+### Fixed
+
+- Fixed missing-parameter quick fixes so they add the first missing parameter instead of the last one.
+- Fixed connector parsing around property names containing `And` or `Or` text.
+- Fixed parameter extraction for nested generic types containing commas.
+- Renamed the displayed extension to **Spring Data JPA Tools**.
 
 ## [0.4.0] - 2026-09-13
 

@@ -1,10 +1,10 @@
-# Spring JPA Autocomplete
+# Spring Data JPA Tools
 
 VS Code assistance for Spring Data JPA repositories: derived-query completion, JPQL completion, diagnostics, quick-fixes, and navigation for Java projects.
 
 ## Installation
 
-Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Java or Spring project. The extension activates automatically for Java files.
+Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java or Spring project. The extension activates automatically for Java files.
 
 ## Features
 
@@ -39,12 +39,14 @@ Install **Spring JPA Autocomplete** from the VS Code Marketplace, then open a Ja
   - Click on repository generic entity `JpaRepository<User, Long>` $\to$ opens `User.java`.
 - **Quick-Fixes (`Alt+Enter` / Lightbulb)**:
   - Add missing parameter to repository method signature.
+  - Add the first missing parameter when several derived-query predicates are present.
   - Fix incompatible return type (`boolean`, `long`).
+  - Rename unknown properties to the closest known entity property when a suggestion is available.
   - Add `@Param` annotation and its import to method parameters.
   - Add `Pageable` parameter and its import when returning `Page<T>`.
 - **Repository generation**:
-  - Run `Spring JPA: Generate Repository Method` with the cursor on a property to generate `findBy`, `existsBy`, or `deleteBy` methods.
-  - Choose operators such as `Containing`, `In`, `Between`, `GreaterThan`, and `LessThan`.
+  - Run `Spring JPA: Generate Repository Method` with the cursor on a property to generate `findBy`, `readBy`, `getBy`, `queryBy`, `searchBy`, `streamBy`, `existsBy`, `countBy`, `deleteBy`, or `removeBy` methods.
+  - Choose operators such as `Containing`, `In`, `NotIn`, `Between`, `GreaterThan`, `LessThan`, and null/boolean predicates.
 - **IDE assistance**:
   - Hover information for JPA entities, properties, and relations.
   - CodeLens above repositories showing their managed entity and property count.
@@ -89,7 +91,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.6.0` release includes the features listed in the changelog above.
+The extension version is maintained in `package.json`. The `0.5.0` release includes the features listed in the changelog above.
 
 ## Requirements
 

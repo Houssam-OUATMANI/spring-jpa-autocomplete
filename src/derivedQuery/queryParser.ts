@@ -99,8 +99,8 @@ function parsePredicates(predicateText: string, baseOffset: number): ParsedPredi
 		let nextConnectorIndex = -1;
 		let foundConnector: 'And' | 'Or' | undefined = undefined;
 
-		const andIndex = predicateText.indexOf('And', cursor);
-		const orIndex = predicateText.indexOf('Or', cursor);
+		const andIndex = findConnectorIndex(predicateText, 'And', cursor);
+		const orIndex = findConnectorIndex(predicateText, 'Or', cursor);
 
 		if (andIndex >= 0 && (orIndex < 0 || andIndex < orIndex)) {
 			nextConnectorIndex = andIndex;
@@ -127,6 +127,18 @@ function parsePredicates(predicateText: string, baseOffset: number): ParsedPredi
 	}
 
 	return predicates;
+}
+
+function findConnectorIndex(text: string, connector: 'And' | 'Or', start: number): number {
+	let index = text.indexOf(connector, start);
+	while (index >= 0) {
+		const next = text[index + connector.length];
+		if (next === undefined || /[A-Z0-9_]/.test(next)) {
+			return index;
+		}
+		index = text.indexOf(connector, index + connector.length);
+	}
+	return -1;
 }
 
 function parsePredicateSegment(

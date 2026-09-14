@@ -86,6 +86,16 @@ export function createDerivedMethodSuggestions(properties: readonly EntityProper
 			detail: `Delete entities by ${property.name}`,
 			parameter: `${property.type} ${property.name}`,
 		},
+		{
+			label: `countBy${capitalize(property.name)}`,
+			detail: `Count entities by ${property.name}`,
+			parameter: `${property.type} ${property.name}`,
+		},
+		{
+			label: `removeBy${capitalize(property.name)}`,
+			detail: `Remove entities by ${property.name}`,
+			parameter: `${property.type} ${property.name}`,
+		},
 	]);
 }
 

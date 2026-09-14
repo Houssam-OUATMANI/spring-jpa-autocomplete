@@ -19,7 +19,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const entityIndex = WorkspaceEntityIndex.getInstance();
 	void entityIndex.ensureInitialized();
 	const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
-	const output = vscode.window.createOutputChannel('Spring JPA Autocomplete');
+	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
 
 	const rebuildIndex = vscode.commands.registerCommand('springJpa.rebuildIndex', async () => {
@@ -59,8 +59,15 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const kind = await vscode.window.showQuickPick([
 			{ label: 'find', description: 'Generate Optional<Entity> findBy...' },
+			{ label: 'read', description: 'Generate readBy...' },
+			{ label: 'get', description: 'Generate getBy...' },
+			{ label: 'query', description: 'Generate queryBy...' },
+			{ label: 'search', description: 'Generate searchBy...' },
+			{ label: 'stream', description: 'Generate Stream<Entity> streamBy...' },
 			{ label: 'exists', description: 'Generate boolean existsBy...' },
+			{ label: 'count', description: 'Generate long countBy...' },
 			{ label: 'delete', description: 'Generate void deleteBy...' },
+			{ label: 'remove', description: 'Generate void removeBy...' },
 		], { placeHolder: 'Choose a repository method' });
 		if (!kind) {
 			return;
@@ -71,9 +78,14 @@ export function activate(context: vscode.ExtensionContext) {
 			{ label: 'StartingWith', description: 'Starts with text' },
 			{ label: 'EndingWith', description: 'Ends with text' },
 			{ label: 'In', description: 'Match a collection of values' },
+			{ label: 'NotIn', description: 'Exclude a collection of values' },
 			{ label: 'Between', description: 'Match a range' },
 			{ label: 'GreaterThan', description: 'Strictly greater than' },
 			{ label: 'LessThan', description: 'Strictly less than' },
+			{ label: 'IsNull', description: 'Match null values' },
+			{ label: 'IsNotNull', description: 'Match non-null values' },
+			{ label: 'True', description: 'Match true values' },
+			{ label: 'False', description: 'Match false values' },
 		], { placeHolder: 'Choose a query operator' });
 		if (!operator) {
 			return;
@@ -91,13 +103,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const edit = new vscode.WorkspaceEdit();
 		edit.insert(editor.document.uri, editor.document.positionAt(closeBrace), `\n\t${method}\n`);
-		if (kind.label === 'find' && !/\bimport\s+java\.util\.Optional\s*;/.test(editor.document.getText())) {
+		if (['find', 'read', 'get', 'query', 'search'].includes(kind.label) && !/\bimport\s+java\.util\.Optional\s*;/.test(editor.document.getText())) {
 			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
 			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Optional;');
 		}
-		if (operator.label === 'In' && !/\bimport\s+java\.util\.Collection\s*;/.test(editor.document.getText())) {
+		if (['In', 'NotIn'].includes(operator.label) && !/\bimport\s+java\.util\.Collection\s*;/.test(editor.document.getText())) {
 			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
 			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Collection;');
+		}
+		if (kind.label === 'stream' && !/\bimport\s+java\.util\.stream\.Stream\s*;/.test(editor.document.getText())) {
+			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
+			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.stream.Stream;');
 		}
 		await vscode.workspace.applyEdit(edit);
 	});
@@ -261,6 +277,15 @@ export function activate(context: vscode.ExtensionContext) {
 					if (d.code) {
 						diagnostic.code = d.code;
 					}
+					if (d.missingParam) {
+						(diagnostic as vscode.Diagnostic & { missingParam?: typeof d.missingParam }).missingParam = d.missingParam;
+					}
+					if (d.expectedReturnType) {
+						(diagnostic as vscode.Diagnostic & { expectedReturnType?: string }).expectedReturnType = d.expectedReturnType;
+					}
+					if (d.suggestedProperty) {
+						(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = d.suggestedProperty;
+					}
 					documentDiagnostics.push(diagnostic);
 				}
 			}
@@ -332,7 +357,7 @@ function parseMethodParameters(paramsText: string): { name: string; type: string
 	if (!paramsText.trim()) {
 		return [];
 	}
-	return paramsText.split(',').map((p) => {
+	return splitTopLevelParameters(paramsText).map((p) => {
 		const trimmed = p.trim();
 		const match = trimmed.match(/([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)$/);
 		if (match) {
@@ -340,6 +365,46 @@ function parseMethodParameters(paramsText: string): { name: string; type: string
 		}
 		return { type: 'Object', name: trimmed };
 	});
+}
+
+function splitTopLevelParameters(paramsText: string): string[] {
+	const parameters: string[] = [];
+	let start = 0;
+	let angleDepth = 0;
+	let parenthesisDepth = 0;
+	let bracketDepth = 0;
+
+	for (let index = 0; index < paramsText.length; index++) {
+		switch (paramsText[index]) {
+			case '<':
+				angleDepth++;
+				break;
+			case '>':
+				angleDepth = Math.max(0, angleDepth - 1);
+				break;
+			case '(':
+				parenthesisDepth++;
+				break;
+			case ')':
+				parenthesisDepth = Math.max(0, parenthesisDepth - 1);
+				break;
+			case '[':
+				bracketDepth++;
+				break;
+			case ']':
+				bracketDepth = Math.max(0, bracketDepth - 1);
+				break;
+			case ',':
+				if (angleDepth === 0 && parenthesisDepth === 0 && bracketDepth === 0) {
+					parameters.push(paramsText.slice(start, index));
+					start = index + 1;
+				}
+				break;
+		}
+	}
+
+	parameters.push(paramsText.slice(start));
+	return parameters;
 }
 
 export function deactivate() { }

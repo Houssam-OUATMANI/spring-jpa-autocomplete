@@ -206,6 +206,15 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(parsed.predicates[0].operator, 'Containing');
 	});
 
+	test('parses three predicates without splitting property names at connector-like text', () => {
+		const parsed = parseDerivedMethodName('findByEmailOrFirstnameOrLastname');
+		assert.ok(parsed);
+		assert.deepStrictEqual(parsed.predicates.map((predicate) => predicate.propertyName), ['Email', 'Firstname', 'Lastname']);
+		assert.deepStrictEqual(parsed.predicates.map((predicate) => predicate.connector), [undefined, 'Or', 'Or']);
+		const orderParsed = parseDerivedMethodName('findByOrderNumberOrBrandName');
+		assert.deepStrictEqual(orderParsed?.predicates.map((predicate) => predicate.propertyName), ['OrderNumber', 'BrandName']);
+	});
+
 	// ==========================================
 	// 4. Validation des signatures de requêtes dérivées (queryValidator)
 	// ==========================================
@@ -437,12 +446,35 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(actions[0].title, "Add parameter 'boolean active' to method signature");
 	});
 
+	test('uses the structured first missing parameter for three-predicate queries', () => {
+		const provider = new SpringJpaCodeActionProvider();
+		const doc = {
+			uri: vscode.Uri.parse('file:///UserRepository.java'),
+			lineAt: () => ({ text: 'List<User> findByEmailOrFirstnameOrLastname(String email);' }),
+		} as any;
+		const diagnostic = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 11), new vscode.Position(0, 42)),
+			"Derived query method 'findByEmailOrFirstnameOrLastname' expects at least 3 parameter(s), but found 1.",
+			vscode.DiagnosticSeverity.Error,
+		) as vscode.Diagnostic & { missingParam: { name: string; type: string } };
+		diagnostic.source = 'spring-jpa';
+		diagnostic.code = 'MISSING_PARAMETER';
+		diagnostic.missingParam = { name: 'firstname', type: 'String' };
+
+		const actions = provider.provideCodeActions(doc, diagnostic.range, { diagnostics: [diagnostic] } as any, {} as any);
+		assert.strictEqual(actions[0].title, "Add parameter 'String firstname' to method signature");
+	});
+
 	test('generates repository methods with the expected Spring Data signature', () => {
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find' }), 'Optional<User> findByEmail(String email);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'active', propertyType: 'boolean', kind: 'exists' }), 'boolean existsByActive(boolean active);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find', operator: 'Containing' }), 'Optional<User> findByEmailContaining(String email);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'age', propertyType: 'Integer', kind: 'find', operator: 'Between' }), 'Optional<User> findByAgeBetween(Integer ageStart, Integer ageEnd);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'id', propertyType: 'Long', kind: 'exists', operator: 'In' }), 'boolean existsByIdIn(Collection<Long> id);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'count' }), 'long countByEmail(String email);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'active', propertyType: 'boolean', kind: 'remove' }), 'void removeByActive(boolean active);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'stream' }), 'Stream<User> streamByEmail(String email);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find', operator: 'IsNull' }), 'Optional<User> findByEmailIsNull();');
 	});
 
 	// ==========================================

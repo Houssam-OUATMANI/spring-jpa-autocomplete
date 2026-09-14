@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
 
+interface SpringJpaDiagnostic extends vscode.Diagnostic {
+	missingParam?: { name: string; type: string };
+	suggestedProperty?: string;
+	expectedReturnType?: string;
+}
+
 export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 	public static readonly providedCodeActionKinds = [
 		vscode.CodeActionKind.QuickFix,
@@ -19,11 +25,11 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 			}
 
 			const code = typeof diagnostic.code === 'object' ? diagnostic.code.value : diagnostic.code;
+			const springDiagnostic = diagnostic as SpringJpaDiagnostic;
 
 			if (code === 'INVALID_RETURN_TYPE') {
-				const match = diagnostic.message.match(/must return (boolean|long)/i);
-				if (match) {
-					const expectedType = match[1];
+				const expectedType = springDiagnostic.expectedReturnType ?? diagnostic.message.match(/must return (boolean|Boolean|long|Long|int|Integer)/i)?.[1];
+				if (expectedType) {
 					const action = new vscode.CodeAction(
 						`Change return type to '${expectedType}'`,
 						vscode.CodeActionKind.QuickFix,
@@ -70,16 +76,14 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					actions.push(action);
 				}
 			} else if (code === 'MISSING_PARAMETER') {
-				// Extract suggested parameter from message
-				const match = diagnostic.message.match(/expects at least \d+ parameter\(s\) \(([^)]+)\)/);
-				if (match) {
-					const expectedList = match[1].split(',').map((s) => s.trim());
+				const missingParam = springDiagnostic.missingParam ?? parseMissingParameter(diagnostic.message);
+				if (missingParam) {
 					const lineText = document.lineAt(diagnostic.range.start.line).text;
 					const closeParen = lineText.indexOf(')', diagnostic.range.end.character);
 					if (closeParen >= 0) {
 						const parenPos = new vscode.Position(diagnostic.range.start.line, closeParen);
 						const hasParamsBefore = lineText.slice(0, closeParen).trim().slice(-1) !== '(';
-						const nextParam = expectedList[expectedList.length - 1];
+						const nextParam = `${missingParam.type} ${missingParam.name}`;
 						const insertion = hasParamsBefore ? `, ${nextParam}` : nextParam;
 
 						const action = new vscode.CodeAction(
@@ -93,11 +97,32 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						actions.push(action);
 					}
 				}
+			} else if (code === 'UNKNOWN_PROPERTY' && springDiagnostic.suggestedProperty) {
+				const action = new vscode.CodeAction(
+					`Rename property to '${springDiagnostic.suggestedProperty}'`,
+					vscode.CodeActionKind.QuickFix,
+				);
+				action.edit = new vscode.WorkspaceEdit();
+				action.edit.replace(document.uri, diagnostic.range, springDiagnostic.suggestedProperty);
+				action.diagnostics = [diagnostic];
+				action.isPreferred = true;
+				actions.push(action);
 			}
 		}
 
 		return actions;
 	}
+}
+
+function parseMissingParameter(message: string): { name: string; type: string } | undefined {
+	const match = message.match(/expects at least \d+ parameter\(s\) \(([^)]+)\)/);
+	if (!match) {
+		return undefined;
+	}
+	const foundCount = Number(message.match(/but found (\d+)/)?.[1] ?? 0);
+	const lastParameter = match[1].split(',')[foundCount]?.trim();
+	const parameterMatch = lastParameter?.match(/^(.+)\s+([A-Za-z_$]\w*)$/);
+	return parameterMatch ? { type: parameterMatch[1], name: parameterMatch[2] } : undefined;
 }
 
 function addImportIfMissing(edit: vscode.WorkspaceEdit, document: vscode.TextDocument, importName: string): void {

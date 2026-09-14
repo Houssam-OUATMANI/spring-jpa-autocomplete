@@ -19,6 +19,7 @@ export interface DerivedMethodValidationDiagnostic {
 	readonly code?: 'INVALID_RETURN_TYPE' | 'MISSING_PARAMETER' | 'EXTRA_PARAMETER' | 'UNKNOWN_PROPERTY' | 'MISSING_PAGEABLE' | 'INVALID_PARAMETER_TYPE';
 	readonly expectedReturnType?: string;
 	readonly missingParam?: { name: string; type: string };
+	readonly suggestedProperty?: string;
 }
 
 const PARAMETERLESS_OPERATORS = new Set([
@@ -54,6 +55,7 @@ export function validateDerivedMethodSignature(
 				startOffset: start,
 				endOffset: end,
 				code: 'UNKNOWN_PROPERTY',
+					suggestedProperty: suggestion,
 			});
 		}
 	}
@@ -67,6 +69,7 @@ export function validateDerivedMethodSignature(
 				startOffset: start,
 				endOffset: start + order.propertyName.length,
 				code: 'UNKNOWN_PROPERTY',
+					suggestedProperty: suggestion,
 			});
 		}
 	}
