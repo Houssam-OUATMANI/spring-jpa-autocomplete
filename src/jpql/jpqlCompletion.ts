@@ -2,13 +2,7 @@ import * as vscode from 'vscode';
 import { EntityInfo } from '../entityModel';
 import { resolveEntityHierarchy } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
-
-const JPQL_KEYWORDS = [
-	'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'LEFT JOIN FETCH',
-	'INNER JOIN', 'ORDER BY', 'GROUP BY', 'HAVING', 'AND', 'OR', 'NOT',
-	'IN', 'BETWEEN', 'LIKE', 'IS NULL', 'IS NOT NULL', 'EXISTS', 'COUNT',
-	'DISTINCT', 'AVG', 'SUM', 'MIN', 'MAX', 'ASC', 'DESC',
-];
+import { JPQL_KEYWORDS } from './jpqlLanguage';
 
 export function createJpqlCompletions(
 	document: vscode.TextDocument,

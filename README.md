@@ -32,7 +32,10 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Alias property completion (`u.` and `r.`), nested paths (`u.address.city`), and parameter completion (`:`).
   - Inherited property resolution in JPQL aliases.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
-  - Basic return-type validation between the JPQL `SELECT` entity and the repository method.
+  - Return-type validation between the JPQL `SELECT` entity and the repository method, including collection, optional, page, and slice results.
+  - JPQL vocabulary and completion for clauses, operators, aggregates, string, numeric, temporal, collection, type, and custom functions.
+  - Syntax highlighting inside `@Query` strings and text blocks for clauses, entities, aliases, properties, parameters, operators, functions, literals, and numbers.
+  - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
 - **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
   - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
   - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
@@ -49,6 +52,7 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Choose operators such as `Containing`, `In`, `NotIn`, `Between`, `GreaterThan`, `LessThan`, and null/boolean predicates.
 - **IDE assistance**:
   - Hover information for JPA entities, properties, and relations.
+  - Contextual JPQL hover documentation for clauses, operators, and functions.
   - CodeLens above repositories showing their managed entity and property count.
 - **Index and performance controls**:
   - Run `Spring JPA: Rebuild Entity Index` after changing project structure.
@@ -91,7 +95,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.5.0` release includes the features listed in the changelog above.
+The extension version is maintained in `package.json`. The `0.6.0` release includes the features listed in the changelog above.
 
 ## Requirements
 

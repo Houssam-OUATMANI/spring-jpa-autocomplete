@@ -1,0 +1,77 @@
+{
+  "scopeName": "source.jpql.embedded.java",
+  "injectionSelector": "L:source.java",
+  "patterns": [
+    {
+      "name": "meta.embedded.jpql",
+      "begin": "(@Query\\s*\\(\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")",
+      "beginCaptures": {
+        "1": {
+          "name": "entity.name.function.annotation.java"
+        },
+        "2": {
+          "name": "punctuation.definition.string.begin.java"
+        }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": {
+        "1": {
+          "name": "punctuation.definition.string.end.java"
+        }
+      },
+      "patterns": [
+        {
+          "name": "keyword.control.jpql",
+          "match": "\\b(?:SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|FETCH|GROUP|BY|HAVING|ORDER|ASC|DESC|UPDATE|DELETE|SET|AS)\\b"
+        },
+        {
+          "name": "keyword.operator.jpql",
+          "match": "\\b(?:AND|OR|NOT|IN|BETWEEN|LIKE|IS|NULL|EMPTY|MEMBER|OF|EXISTS|ALL|ANY|SOME)\\b|<>|<=|>=|=|<|>|\\+|\\-|\\*|/"
+        },
+        {
+          "name": "support.function.jpql",
+          "match": "\\b(?:AVG|COUNT|MAX|MIN|SUM|CONCAT|SUBSTRING|LOWER|UPPER|TRIM|LENGTH|LOCATE|REPLACE|LEFT|RIGHT|ABS|MOD|SQRT|CEILING|EXP|FLOOR|LN|POWER|ROUND|SIGN|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|LOCAL_DATE|LOCAL_TIME|LOCAL_DATETIME|EXTRACT|SIZE|INDEX|KEY|VALUE|ENTRY|TYPE|TREAT|FUNCTION)\\b(?=\\s*\\()"
+        },
+        {
+          "match": "\\b(FROM|JOIN)\\s+([A-Z][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.jpql"
+            },
+            "2": {
+              "name": "entity.name.type.jpql"
+            }
+          }
+        },
+        {
+          "match": "\\b(?:FROM|JOIN)\\s+[A-Z][A-Za-z0-9_$]*(?:\\s+AS)?\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
+          "captures": {
+            "1": {
+              "name": "variable.other.alias.jpql"
+            }
+          }
+        },
+        {
+          "name": "variable.parameter.jpql",
+          "match": ":[A-Za-z_$][A-Za-z0-9_$]*"
+        },
+        {
+          "name": "constant.language.jpql",
+          "match": "\\b(?:TRUE|FALSE)\\b"
+        },
+        {
+          "name": "string.quoted.jpql",
+          "match": "'(?:[^'\\\\]|\\\\.)*'"
+        },
+        {
+          "name": "constant.numeric.jpql",
+          "match": "\\b\\d+(?:\\.\\d+)?\\b"
+        },
+        {
+          "name": "variable.other.property.jpql",
+          "match": "\\b[A-Za-z_$][A-Za-z0-9_$]*\\.([A-Za-z_$][A-Za-z0-9_$]*)\\b"
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { findEntityProperties, resolveEntityPropertyPath, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
+import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 
 export class SpringJpaHoverProvider implements vscode.HoverProvider {
 	public async provideHover(
@@ -27,6 +28,10 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 			(candidate) => offset >= candidate.queryStartOffset && offset <= candidate.queryEndOffset,
 		);
 		if (query) {
+			const jpqlDocumentation = getJpqlDocumentation(word);
+			if (jpqlDocumentation) {
+				return new vscode.Hover(new vscode.MarkdownString(formatJpqlDocumentation(jpqlDocumentation)), wordRange);
+			}
 			const access = query.propertyAccesses.find((candidate) => offset >= candidate.startOffset && offset <= candidate.endOffset);
 			if (access) {
 				const entityName = query.aliases.get(access.alias);
@@ -51,4 +56,11 @@ function formatProperty(name: string, type: string, relation?: string, entityNam
 	const relationText = relation ? `\n\nRelation JPA: ${relation}` : '';
 	const ownerText = entityName ? `\n\nEntité: ${entityName}` : '';
 	return `**JPA property** ${name}\n\nType: ${type}${relationText}${ownerText}`;
+}
+
+function formatJpqlDocumentation(documentation: ReturnType<typeof getJpqlDocumentation>): string {
+	if (!documentation) {
+		return '';
+	}
+	return `**JPQL ${documentation.kind}**\n\n### ${documentation.title}\n${documentation.description}\n\n**Syntaxe**\n\`${documentation.syntax}\`\n\n**Exemple**\n\`${documentation.useCase}\``;
 }

@@ -14,6 +14,8 @@ import { SpringJpaDefinitionProvider } from '../navigation/definitionProvider';
 import { createDerivedQueryCompletions } from '../derivedQuery/queryCompletion';
 import { findClosestProperty } from '../propertySuggestions';
 import { generateRepositoryMethod } from '../repositoryGenerator';
+import { JPQL_FUNCTIONS } from '../jpql/jpqlLanguage';
+import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -370,6 +372,50 @@ suite('Extension Test Suite', () => {
 		const query = extractAllJpqlQueries(documentText, [userEntity])[0];
 		const diagnostics = validateJpql(query, [userEntity]);
 		assert.ok(diagnostics.some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'));
+	});
+
+	test('keeps nested JPQL functions inside @Query and preserves the entity return type', () => {
+		const documentText = `
+			@Query("""
+				SELECT p
+				FROM Post p
+				WHERE LOWER(p.title) LIKE LOWER(CONCAT('%', :term, '%'))
+				   OR LOWER(p.content) LIKE LOWER(CONCAT('%', :term, '%'))
+			""")
+			List<Post> search(@Param("term") String term);
+		`;
+		const postEntity = {
+			name: 'Post',
+			uri: vscode.Uri.parse('file:///Post.java'),
+			properties: [{ name: 'title', type: 'String' }, { name: 'content', type: 'String' }],
+		};
+
+		const query = extractAllJpqlQueries(documentText, [postEntity])[0];
+		assert.strictEqual(query.selectedExpression, 'p');
+		assert.strictEqual(query.selectedAlias, 'p');
+		assert.deepStrictEqual(query.functions.map((fn) => fn.name), ['LOWER', 'LOWER', 'CONCAT', 'LOWER', 'LOWER', 'CONCAT']);
+		assert.strictEqual(validateJpql(query, [postEntity]).some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'), false);
+	});
+
+	test('exposes the standard JPQL function vocabulary', () => {
+		assert.ok(JPQL_FUNCTIONS.includes('CONCAT'));
+		assert.ok(JPQL_FUNCTIONS.includes('CURRENT_TIMESTAMP'));
+		assert.ok(JPQL_FUNCTIONS.includes('TREAT'));
+		assert.ok(JPQL_FUNCTIONS.includes('FUNCTION'));
+	});
+
+	test('provides concise JPQL hover documentation for clauses and functions', () => {
+		const selectDocumentation = getJpqlDocumentation('select');
+		assert.strictEqual(selectDocumentation?.kind, 'Clause');
+		assert.ok(selectDocumentation?.description.includes('values returned'));
+		assert.ok(selectDocumentation?.syntax.includes('SELECT'));
+		assert.ok(selectDocumentation?.useCase.includes('FROM User'));
+
+		const upperDocumentation = getJpqlDocumentation('UPPER');
+		assert.strictEqual(upperDocumentation?.kind, 'Function');
+		assert.ok(upperDocumentation?.description.includes('uppercase'));
+		assert.ok(upperDocumentation?.useCase.includes('UPPER'));
+		assert.strictEqual(getJpqlDocumentation('unknown'), undefined);
 	});
 
 	test('resolves inherited and nested JPQL properties', () => {

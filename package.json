@@ -3,7 +3,7 @@
   "displayName": "Spring Data JPA Tools",
   "publisher": "houssam-ouatmani",
   "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, navigation, and diagnostics for Java repositories.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",
@@ -53,6 +53,18 @@
       {
         "command": "springJpa.generateRepositoryMethod",
         "title": "Spring JPA: Generate Repository Method"
+      }
+    ],
+    "grammars": [
+      {
+        "scopeName": "source.jpql.embedded.java",
+        "path": "./syntaxes/jpql-embedded.json",
+        "injectTo": [
+          "source.java"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.jpql": "jpql"
+        }
       }
     ],
     "configuration": {

@@ -7,7 +7,9 @@ export interface JpqlQueryInfo {
 	readonly queryStartOffset: number; // offset in document where query string content starts
 	readonly queryEndOffset: number;
 	readonly isNative: boolean;
+	readonly selectedExpression?: string;
 	readonly selectedAlias?: string;
+	readonly functions: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly aliases: ReadonlyMap<string, string>; // alias -> EntityName
 	readonly namedParameters: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly propertyAccesses: readonly { alias: string; property: string; startOffset: number; endOffset: number }[];
@@ -26,19 +28,30 @@ export interface JpqlMethodSignature {
 
 export function extractAllJpqlQueries(documentText: string, knownEntities: readonly EntityInfo[]): JpqlQueryInfo[] {
 	const queries: JpqlQueryInfo[] = [];
-
-	// Match @Query(...) including text blocks """...""" or single/multi-line "..."
-	// Also detect nativeQuery = true
-	const queryAnnotationRegex = /@Query\s*(((?:\("""[\s\S]*?"""\)|"(?:\\.|[^"\\])*"|[^)])*))\)\s*(?:@\w+(?:\([\s\S]*?\))?\s*)*\b([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/g;
+	const queryAnnotationRegex = /@Query\s*\(/g;
 
 	let match: RegExpExecArray | null;
 	while ((match = queryAnnotationRegex.exec(documentText)) !== null) {
-		const fullMatch = match[0];
-		const annotationArgs = match[1];
-		let returnType = match[2].trim();
-		let methodName = match[3];
-		let paramsText = match[4];
-		const signatureMatch = fullMatch.match(/(?:^|\)\s*)(?:@[\w.]+(?:\([\s\S]*?\))?\s*)*([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;\s*$/);
+		const argsStart = queryAnnotationRegex.lastIndex;
+		const argsEnd = findClosingParenthesis(documentText, argsStart - 1);
+		if (argsEnd < 0) {
+			continue;
+		}
+		const annotationArgs = documentText.slice(argsStart, argsEnd);
+		const methodEnd = findMethodEnd(documentText, argsEnd + 1);
+		if (methodEnd < 0) {
+			queryAnnotationRegex.lastIndex = argsEnd + 1;
+			continue;
+		}
+		const fullMatch = documentText.slice(match.index, methodEnd);
+		const signatureMatch = documentText.slice(argsEnd + 1, methodEnd).match(/(?:@\w+(?:\([^)]*\))?\s*)*([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/);
+		if (!signatureMatch) {
+			queryAnnotationRegex.lastIndex = argsEnd + 1;
+			continue;
+		}
+		let returnType = signatureMatch[1].trim();
+		let methodName = signatureMatch[2];
+		let paramsText = signatureMatch[3];
 		if (signatureMatch) {
 			returnType = signatureMatch[1].trim();
 			methodName = signatureMatch[2];
@@ -73,7 +86,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		const queryEndOffset = contentStartOffset + queryContent.length;
 
 		// Extract method signature
-		const methodParamsOffset = match.index + fullMatch.indexOf(paramsText);
+		const methodParamsOffset = argsEnd + 1 + documentText.slice(argsEnd + 1, methodEnd).indexOf(paramsText);
 		const methodSignature: JpqlMethodSignature = {
 			rawText: fullMatch,
 			methodName,
@@ -85,7 +98,10 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 
 		// Parse JPQL structure
 		const aliases = resolveAliases(queryContent, knownEntities);
-		const selectedAlias = queryContent.match(/\bSELECT\s+(?:DISTINCT\s+)?([A-Za-z_]\w*)/i)?.[1];
+		const selectionMatch = queryContent.match(/\bSELECT\s+(?:DISTINCT\s+)?([\s\S]*?)\s+FROM\b/i);
+		const selectedExpression = selectionMatch?.[1].trim();
+		const selectedAlias = selectedExpression && /^[A-Za-z_]\w*$/.test(selectedExpression) ? selectedExpression : undefined;
+		const functions = extractFunctions(queryContent, contentStartOffset);
 		const namedParameters = extractNamedParameters(queryContent, contentStartOffset);
 		const propertyAccesses = extractPropertyAccesses(queryContent, contentStartOffset);
 		const referencedEntities = extractReferencedEntities(queryContent, contentStartOffset);
@@ -96,7 +112,9 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			queryStartOffset: contentStartOffset,
 			queryEndOffset,
 			isNative,
+			selectedExpression,
 			selectedAlias,
+			functions,
 			aliases,
 			namedParameters,
 			propertyAccesses,
@@ -106,6 +124,53 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 	}
 
 	return queries;
+}
+
+function extractFunctions(query: string, baseOffset: number): { name: string; startOffset: number; endOffset: number }[] {
+	const functions: { name: string; startOffset: number; endOffset: number }[] = [];
+	for (const match of query.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)) {
+		const name = match[1].toUpperCase();
+		if (name === 'FROM' || name === 'JOIN' || name === 'WHERE') {
+			continue;
+		}
+		const startOffset = baseOffset + match.index;
+		functions.push({ name, startOffset, endOffset: startOffset + match[1].length });
+	}
+	return functions;
+}
+
+function findClosingParenthesis(text: string, openingOffset: number): number {
+	let depth = 0;
+	let quote: '"' | "'" | undefined;
+	for (let offset = openingOffset; offset < text.length; offset++) {
+		if (text.startsWith('"""', offset)) {
+			offset += 2;
+			continue;
+		}
+		const character = text[offset];
+		if (quote) {
+			if (character === '\\') {
+				offset++;
+			} else if (character === quote) {
+				quote = undefined;
+			}
+			continue;
+		}
+		if (character === '"' || character === "'") {
+			quote = character;
+		} else if (character === '(') {
+			depth++;
+		} else if (character === ')' && --depth === 0) {
+			return offset;
+		}
+	}
+	return -1;
+}
+
+function findMethodEnd(text: string, startOffset: number): number {
+	const methodText = text.slice(startOffset);
+	const methodMatch = methodText.match(/^(?:\s*@\w+(?:\([^)]*\))?\s*)*[\w$<>?[\]\s]+?\s+[A-Za-z_$]\w*\s*\(([\s\S]*?)\)\s*;/);
+	return methodMatch ? startOffset + methodMatch[0].length : -1;
 }
 
 function resolveAliases(query: string, knownEntities: readonly EntityInfo[]): Map<string, string> {

@@ -4,6 +4,23 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.6.0] - 2026-09-16
+
+### Added
+
+- Added JPQL syntax highlighting inside Java `@Query` strings and text blocks.
+- Added concise JPQL hover documentation with syntax and a practical example for common clauses, operators, and functions.
+- JPQL hover documentation is currently provided in English; multilingual support is planned for a later release.
+- Added distinct highlighting for JPQL clauses, operators, entities, aliases, properties, parameters, functions, literals, and numeric values.
+- Added a standard JPQL vocabulary covering joins, grouping, ordering, aggregate functions, string functions, numeric functions, temporal functions, collection functions, `TREAT`, `TYPE`, and `FUNCTION`.
+- Added parsing of nested JPQL function calls such as `LOWER(CONCAT(...))` without corrupting the repository method return type.
+- Added JPQL regression tests for nested functions and entity return types.
+
+### Fixed
+
+- Fixed `@Query` extraction stopping at the first closing parenthesis inside a JPQL function call.
+- Fixed false diagnostics such as `JPQL query selects 'Post', but method returns 'LIKE'`.
+
 ## [0.5.0] - 2026-09-14
 
 ### Added
