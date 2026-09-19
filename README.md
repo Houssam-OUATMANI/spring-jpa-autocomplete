@@ -29,13 +29,14 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
 - **Advanced JPQL support**:
   - Single-line and multi-line Java 15+ Text Blocks (`""" SELECT ... """`).
   - Table and alias resolution for `FROM ... JOIN ...` clauses, including chained joins.
-  - Alias property completion (`u.` and `r.`), nested paths (`u.address.city`), and parameter completion (`:`).
+  - Alias property completion (`u.` and `r.`), nested path completion (`p.category.` suggests `Category` properties), nested paths (`u.address.city`), and parameter completion (`:`).
   - Inherited property resolution in JPQL aliases.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
   - Return-type validation between the JPQL `SELECT` entity and the repository method, including collection, optional, page, and slice results.
   - JPQL vocabulary and completion for clauses, operators, aggregates, string, numeric, temporal, collection, type, and custom functions.
   - Syntax highlighting inside `@Query` strings and text blocks for clauses, entities, aliases, properties, parameters, operators, functions, literals, and numbers.
-  - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
+  - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LEFT JOIN`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
+  - Hover documentation recognizes compound join keywords such as `LEFT JOIN`, `LEFT OUTER JOIN`, and `INNER JOIN` as a single JPQL construct.
 - **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
   - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
   - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
@@ -95,7 +96,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.6.0` release includes the features listed in the changelog above.
+The extension version is maintained in `package.json`. The `0.7.0` release includes the features and fixes listed in the changelog above.
 
 ## Requirements
 

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { EntityInfo } from '../entityModel';
-import { resolveEntityHierarchy } from '../entityDiscovery';
+import { referencedEntityNames, resolveEntityHierarchy, resolveEntityPropertyPath } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
 import { JPQL_KEYWORDS } from './jpqlLanguage';
 
@@ -31,9 +31,11 @@ export function createJpqlCompletions(
 	const items: vscode.CompletionItem[] = [];
 
 	// 1. Check for alias property completion: e.g. "u."
-	const aliasPropMatch = linePrefix.match(/\b([A-Za-z_]\w*)\.([A-Za-z_]\w*)?$/);
+	const aliasPropMatch = linePrefix.match(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
 	if (aliasPropMatch) {
-		const alias = aliasPropMatch[1];
+		const path = aliasPropMatch[1].split('.');
+		const alias = path[0];
+		const nestedPath = path.slice(1).join('.');
 		const partial = aliasPropMatch[2] ?? '';
 		const startPos = new vscode.Position(position.line, position.character - partial.length);
 		const replaceRange = new vscode.Range(startPos, position);
@@ -49,9 +51,16 @@ export function createJpqlCompletions(
 		}
 
 		const entityMap = new Map(entities.map((e) => [e.name.toLowerCase(), e]));
-		const targetEntity = targetEntityName
+		let targetEntity = targetEntityName
 			? entityMap.get(targetEntityName.toLowerCase())
 			: entities[0]; // fallback to first entity if only 1
+
+		if (targetEntity && nestedPath) {
+			const nestedProperty = resolveEntityPropertyPath(targetEntity, nestedPath, entityMap);
+			const nestedEntityName = nestedProperty?.targetEntity
+				?? referencedEntityNames(nestedProperty?.type ?? '').find((name) => entityMap.has(name.toLowerCase()));
+			targetEntity = nestedEntityName ? entityMap.get(nestedEntityName.toLowerCase()) : undefined;
+		}
 
 		if (targetEntity) {
 			const resolvedTarget = resolveEntityHierarchy(targetEntity, new Map(entities.map((entity) => [entity.name, entity])));

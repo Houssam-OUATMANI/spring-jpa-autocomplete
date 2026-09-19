@@ -4,6 +4,18 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.7.0] - 2026-09-19
+
+### Added
+
+- Added nested JPQL property completion after association paths such as `p.category.`.
+- Added dedicated hover documentation for compound join clauses including `LEFT JOIN`, `LEFT OUTER JOIN`, `INNER JOIN`, `RIGHT JOIN`, `FULL JOIN`, and `CROSS JOIN`.
+- Added regression tests for nested association completion and compound JPQL keyword documentation.
+
+### Fixed
+
+- Fixed nested JPQL property hovers so `p.category.id` reports `Category.id` instead of attributing the property to `Product`.
+
 ## [0.6.0] - 2026-09-16
 
 ### Added
@@ -20,6 +32,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 - Fixed `@Query` extraction stopping at the first closing parenthesis inside a JPQL function call.
 - Fixed false diagnostics such as `JPQL query selects 'Post', but method returns 'LIKE'`.
+- Fixed Ctrl+Click navigation for nested JPQL properties so `p.category.id` opens the property in `Category.java`.
+- Added JPQL parameter type diagnostics when a named parameter type does not match the referenced property, for example `Category.id` declared as `Long` but passed as `UUID`.
 
 ## [0.5.0] - 2026-09-14
 

@@ -8,7 +8,7 @@ export interface JpqlDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE';
+	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE';
 	readonly paramName?: string;
 }
 
@@ -69,7 +69,10 @@ export function validateJpql(
 
 		for (const namedParam of queryInfo.namedParameters) {
 			queryParamNames.add(namedParam.name.toLowerCase());
-			if (methodParams.length > 0 && !methodParamNames.has(namedParam.name.toLowerCase())) {
+			const methodParam = methodParams.find((parameter) =>
+				(parameter.paramName ?? parameter.name).toLowerCase() === namedParam.name.toLowerCase(),
+			);
+			if (methodParams.length > 0 && !methodParam) {
 				diagnostics.push({
 					message: `Named parameter ':${namedParam.name}' is not declared by method '${queryInfo.methodSignature.methodName}'.`,
 					severity: 'error',
@@ -78,6 +81,18 @@ export function validateJpql(
 					code: 'MISSING_METHOD_PARAM',
 					paramName: namedParam.name,
 				});
+			} else if (methodParam) {
+				const propertyType = findParameterPropertyType(queryInfo, namedParam, entityMap);
+				if (propertyType && !areJpqlParameterTypesCompatible(propertyType, methodParam.type)) {
+					diagnostics.push({
+						message: `Parameter ':${namedParam.name}' expects type '${propertyType}', but method parameter '${methodParam.name}' has type '${methodParam.type}'.`,
+						severity: 'error',
+						startOffset: methodParam.startOffset,
+						endOffset: methodParam.endOffset,
+						code: 'INVALID_PARAMETER_TYPE',
+						paramName: namedParam.name,
+					});
+				}
 			}
 		}
 
@@ -119,6 +134,43 @@ export function validateJpql(
 	}
 
 	return diagnostics;
+}
+
+function findParameterPropertyType(
+	queryInfo: JpqlQueryInfo,
+	namedParameter: JpqlQueryInfo['namedParameters'][number],
+	entityMap: Map<string, EntityInfo>,
+): string | undefined {
+	const precedingAccesses = queryInfo.propertyAccesses
+		.filter((access) => access.endOffset <= namedParameter.startOffset)
+		.filter((access) => /^[\s=<>!+*/-]*$/.test(queryInfo.queryContent.slice(
+			access.endOffset - queryInfo.queryStartOffset,
+			namedParameter.startOffset - queryInfo.queryStartOffset,
+		)));
+	const access = precedingAccesses[precedingAccesses.length - 1];
+	if (!access) {
+		return undefined;
+	}
+	const entityName = queryInfo.aliases.get(access.alias);
+	const entity = entityName ? entityMap.get(entityName.toLowerCase()) : undefined;
+	return entity ? resolveEntityPropertyPath(entity, access.property, entityMap)?.type : undefined;
+}
+
+function areJpqlParameterTypesCompatible(propertyType: string, parameterType: string): boolean {
+	const property = normalizeJavaType(propertyType);
+	const parameter = normalizeJavaType(parameterType);
+	if (property === parameter) {
+		return true;
+	}
+	const parameterElement = parameter.match(/^(?:Collection|List|Set|Iterable|Stream)<(.+)>$/)?.[1];
+	return parameterElement === property;
+}
+
+function normalizeJavaType(type: string): string {
+	return type
+		.replace(/^\?\s*(?:extends|super)\s+/, '')
+		.replace(/^.*\./, '')
+		.replace(/\s+/g, '');
 }
 
 function validateReturnType(

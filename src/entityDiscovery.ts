@@ -251,8 +251,17 @@ export function resolveEntityPropertyPath(
 	propertyPath: string,
 	entitiesByName: ReadonlyMap<string, EntityInfo>,
 ): EntityProperty | undefined {
+	return resolveEntityPropertyPathWithOwner(entity, propertyPath, entitiesByName)?.property;
+}
+
+export function resolveEntityPropertyPathWithOwner(
+	entity: EntityInfo,
+	propertyPath: string,
+	entitiesByName: ReadonlyMap<string, EntityInfo>,
+): { property: EntityProperty; owner: EntityInfo } | undefined {
 	let currentEntity = entity;
 	let resolved: EntityProperty | undefined;
+	let owner: EntityInfo | undefined;
 
 	for (const segment of propertyPath.split('.')) {
 		const current = resolveEntityHierarchy(currentEntity, entitiesByName);
@@ -260,13 +269,14 @@ export function resolveEntityPropertyPath(
 		if (!resolved) {
 			return undefined;
 		}
+		owner = current;
 		const nextEntityName = referencedEntityNames(resolved.type).find((name) => findEntityByName(entitiesByName, name));
 		if (nextEntityName) {
 			currentEntity = findEntityByName(entitiesByName, nextEntityName)!;
 		}
 	}
 
-	return resolved;
+	return resolved && owner ? { property: resolved, owner } : undefined;
 }
 
 function findEntityByName(entitiesByName: ReadonlyMap<string, EntityInfo>, name: string): EntityInfo | undefined {

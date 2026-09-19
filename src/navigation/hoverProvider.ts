@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { findEntityProperties, resolveEntityPropertyPath, WorkspaceEntityIndex } from '../entityDiscovery';
+import { findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 
@@ -28,17 +28,21 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 			(candidate) => offset >= candidate.queryStartOffset && offset <= candidate.queryEndOffset,
 		);
 		if (query) {
-			const jpqlDocumentation = getJpqlDocumentation(word);
+			const compoundDocumentation = findCompoundJpqlDocumentation(query.queryContent, query.queryStartOffset, offset);
+			const jpqlDocumentation = compoundDocumentation?.documentation ?? getJpqlDocumentation(word);
 			if (jpqlDocumentation) {
-				return new vscode.Hover(new vscode.MarkdownString(formatJpqlDocumentation(jpqlDocumentation)), wordRange);
+				const documentationRange = compoundDocumentation
+					? new vscode.Range(document.positionAt(compoundDocumentation.startOffset), document.positionAt(compoundDocumentation.endOffset))
+					: wordRange;
+				return new vscode.Hover(new vscode.MarkdownString(formatJpqlDocumentation(jpqlDocumentation)), documentationRange);
 			}
 			const access = query.propertyAccesses.find((candidate) => offset >= candidate.startOffset && offset <= candidate.endOffset);
 			if (access) {
 				const entityName = query.aliases.get(access.alias);
 				const target = entities.find((candidate) => candidate.name.toLowerCase() === entityName?.toLowerCase());
-				const property = target && resolveEntityPropertyPath(target, access.property, new Map(entities.map((candidate) => [candidate.name, candidate])));
-				if (property) {
-					return new vscode.Hover(new vscode.MarkdownString(formatProperty(property.name, property.type, property.relation, target?.name)), wordRange);
+				const resolved = target && resolveEntityPropertyPathWithOwner(target, access.property, new Map(entities.map((candidate) => [candidate.name, candidate])));
+				if (resolved) {
+					return new vscode.Hover(new vscode.MarkdownString(formatProperty(resolved.property.name, resolved.property.type, resolved.property.relation, resolved.owner.name)), wordRange);
 				}
 			}
 		}
@@ -50,6 +54,21 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 		}
 		return undefined;
 	}
+}
+
+function findCompoundJpqlDocumentation(
+	queryContent: string,
+	queryStartOffset: number,
+	documentOffset: number,
+): { documentation: ReturnType<typeof getJpqlDocumentation>; startOffset: number; endOffset: number } | undefined {
+	for (const match of queryContent.matchAll(/\b(LEFT(?:\s+OUTER)?|INNER|RIGHT|FULL|CROSS)\s+JOIN\b/gi)) {
+		const startOffset = queryStartOffset + (match.index ?? 0);
+		const endOffset = startOffset + match[0].length;
+		if (documentOffset >= startOffset && documentOffset <= endOffset) {
+			return { documentation: getJpqlDocumentation(match[0]), startOffset, endOffset };
+		}
+	}
+	return undefined;
 }
 
 function formatProperty(name: string, type: string, relation?: string, entityName?: string): string {

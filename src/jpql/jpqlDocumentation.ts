@@ -1,3 +1,5 @@
+import { JPQL_CLAUSES, JPQL_FUNCTIONS, JPQL_OPERATORS } from './jpqlLanguage';
+
 export interface JpqlDocumentation {
 	readonly title: string;
 	readonly kind: 'Clause' | 'Operator' | 'Function';
@@ -30,6 +32,42 @@ const documentation: Readonly<Record<string, JpqlDocumentation>> = {
 		description: 'Traverses an entity association to filter or select related entities.',
 		syntax: 'JOIN alias.relation joinedAlias',
 		useCase: 'JOIN u.orders o WHERE o.status = :status',
+	},
+	'LEFT JOIN': {
+		title: 'LEFT JOIN', kind: 'Clause',
+		description: 'Keeps the parent entity even when the related association has no matching row.',
+		syntax: 'LEFT JOIN alias.relation joinedAlias',
+		useCase: 'LEFT JOIN u.orders o WHERE o.status = :status',
+	},
+	'LEFT OUTER JOIN': {
+		title: 'LEFT OUTER JOIN', kind: 'Clause',
+		description: 'Outer-join variant of LEFT JOIN that preserves the parent entity.',
+		syntax: 'LEFT OUTER JOIN alias.relation joinedAlias',
+		useCase: 'LEFT OUTER JOIN u.orders o',
+	},
+	'INNER JOIN': {
+		title: 'INNER JOIN', kind: 'Clause',
+		description: 'Returns only parent entities with a matching related entity.',
+		syntax: 'INNER JOIN alias.relation joinedAlias',
+		useCase: 'INNER JOIN u.orders o WHERE o.status = :status',
+	},
+	'RIGHT JOIN': {
+		title: 'RIGHT JOIN', kind: 'Clause',
+		description: 'Preserves the joined side when the provider supports right outer joins.',
+		syntax: 'RIGHT JOIN alias.relation joinedAlias',
+		useCase: 'RIGHT JOIN u.orders o',
+	},
+	'FULL JOIN': {
+		title: 'FULL JOIN', kind: 'Clause',
+		description: 'Preserves unmatched rows from both sides when supported by the provider.',
+		syntax: 'FULL JOIN alias.relation joinedAlias',
+		useCase: 'FULL JOIN u.orders o',
+	},
+	'CROSS JOIN': {
+		title: 'CROSS JOIN', kind: 'Clause',
+		description: 'Produces a Cartesian product between two entity types.',
+		syntax: 'CROSS JOIN Entity alias',
+		useCase: 'CROSS JOIN Product p',
 	},
 	'ORDER BY': {
 		title: 'ORDER BY', kind: 'Clause',
@@ -178,5 +216,38 @@ const documentation: Readonly<Record<string, JpqlDocumentation>> = {
 };
 
 export function getJpqlDocumentation(word: string): JpqlDocumentation | undefined {
-	return documentation[word.toUpperCase()];
+	const normalized = word.toUpperCase();
+	const documented = documentation[normalized];
+	if (documented) {
+		return documented;
+	}
+
+	if (JPQL_CLAUSES.includes(normalized as typeof JPQL_CLAUSES[number])) {
+		return createFallbackDocumentation(normalized, 'Clause', `JPQL clause ${normalized}.`, normalized);
+	}
+	if (normalized === 'DISTINCT') {
+		return createFallbackDocumentation(normalized, 'Clause', 'Removes duplicate values or entities from the result.', 'SELECT DISTINCT expression');
+	}
+	if (JPQL_OPERATORS.includes(normalized as typeof JPQL_OPERATORS[number])) {
+		return createFallbackDocumentation(normalized, 'Operator', `JPQL operator ${normalized}.`, `expression ${normalized} value`);
+	}
+	if (JPQL_FUNCTIONS.includes(normalized as typeof JPQL_FUNCTIONS[number])) {
+		return createFallbackDocumentation(normalized, 'Function', `JPQL function ${normalized}.`, `${normalized}(expression)`);
+	}
+	return undefined;
+}
+
+function createFallbackDocumentation(
+	title: string,
+	kind: JpqlDocumentation['kind'],
+	description: string,
+	syntax: string,
+): JpqlDocumentation {
+	return {
+		title,
+		kind,
+		description,
+		syntax,
+		useCase: `${syntax} ...`,
+	};
 }

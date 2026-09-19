@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, WorkspaceEntityIndex } from '../entityDiscovery';
+import { extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel } from '../entityModel';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
@@ -14,8 +14,9 @@ import { SpringJpaDefinitionProvider } from '../navigation/definitionProvider';
 import { createDerivedQueryCompletions } from '../derivedQuery/queryCompletion';
 import { findClosestProperty } from '../propertySuggestions';
 import { generateRepositoryMethod } from '../repositoryGenerator';
-import { JPQL_FUNCTIONS } from '../jpql/jpqlLanguage';
+import { JPQL_FUNCTIONS, JPQL_KEYWORDS } from '../jpql/jpqlLanguage';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
+import { createJpqlCompletions } from '../jpql/jpqlCompletion';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -359,6 +360,17 @@ suite('Extension Test Suite', () => {
 		assert.ok(diags.some((d) => d.code === 'UNKNOWN_PROPERTY' && d.message.includes('nonExistentProp')));
 	});
 
+	test('validates JPQL named parameter types against nested property types', () => {
+		const category = parseEntityModel('@Entity class Category { private Long id; }', vscode.Uri.parse('file:///Category.java'))!;
+		const product = parseEntityModel('@Entity class Product { private Category category; }', vscode.Uri.parse('file:///Product.java'))!;
+		const documentText = '@Query("SELECT p FROM Product p WHERE p.category.id = :id") List<Product> find(@Param("id") UUID id);';
+		const query = extractAllJpqlQueries(documentText, [product, category])[0];
+		const diagnostics = validateJpql(query, [product, category]);
+
+		assert.ok(diagnostics.some((diagnostic) => diagnostic.code === 'INVALID_PARAMETER_TYPE'));
+		assert.ok(diagnostics.some((diagnostic) => diagnostic.message.includes("expects type 'Long'")));
+	});
+
 	test('validates JPQL selected entity against repository return type', () => {
 		const documentText = `
 			@Query("SELECT u FROM User u")
@@ -416,6 +428,30 @@ suite('Extension Test Suite', () => {
 		assert.ok(upperDocumentation?.description.includes('uppercase'));
 		assert.ok(upperDocumentation?.useCase.includes('UPPER'));
 		assert.strictEqual(getJpqlDocumentation('unknown'), undefined);
+		assert.strictEqual(getJpqlDocumentation('LOCATE')?.kind, 'Function');
+		assert.strictEqual(getJpqlDocumentation('LEFT JOIN')?.title, 'LEFT JOIN');
+	});
+
+	test('documents every single-token JPQL completion keyword', () => {
+		for (const keyword of JPQL_KEYWORDS.filter((value) => !value.includes(' '))) {
+			assert.ok(getJpqlDocumentation(keyword), `Missing documentation for ${keyword}`);
+		}
+	});
+
+	test('completes properties after a nested JPQL association path', () => {
+		const category = parseEntityModel('@Entity class Category { private String name; private UUID id; }', vscode.Uri.parse('file:///Category.java'))!;
+		const product = parseEntityModel('@Entity class Product { private Category category; }', vscode.Uri.parse('file:///Product.java'))!;
+		const text = '@Query("SELECT p FROM Product p WHERE p.category.na") List<Product> find();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const completionOffset = text.indexOf('na"') + 2;
+		const completions = createJpqlCompletions(document, new vscode.Position(0, completionOffset), [product, category]);
+
+		assert.ok(completions?.some((item) => item.label === 'name'));
+		assert.strictEqual(completions?.find((item) => item.label === 'name')?.detail, 'Category.name : String');
 	});
 
 	test('resolves inherited and nested JPQL properties', () => {
@@ -429,6 +465,18 @@ suite('Extension Test Suite', () => {
 		assert.ok(resolveEntityPropertyPath(user, 'address.city', entityMap));
 		assert.ok(resolveEntityPropertyPath(user, 'tenantId', entityMap));
 		assert.deepStrictEqual(validateJpql(query, entities), []);
+	});
+
+	test('keeps the nested property owner when resolving a JPQL path', () => {
+		const category = parseEntityModel('@Entity class Category { private UUID id; }', vscode.Uri.parse('file:///Category.java'))!;
+		const product = parseEntityModel('@Entity class Product { private Category category; }', vscode.Uri.parse('file:///Product.java'))!;
+		const entities = [product, category];
+		const entityMap = new Map(entities.map((entity) => [entity.name.toLowerCase(), entity]));
+		const resolved = resolveEntityPropertyPathWithOwner(product, 'category.id', entityMap);
+
+		assert.strictEqual(resolved?.property.type, 'UUID');
+		assert.strictEqual(resolved?.owner.name, 'Category');
+		assert.strictEqual(resolveEntityPropertyPath(product, 'category.id', entityMap)?.type, 'UUID');
 	});
 
 	test('keeps same-named entities from different URIs indexed independently', () => {
@@ -547,6 +595,38 @@ suite('Extension Test Suite', () => {
 		const location = await provider.provideDefinition(repoDoc, new vscode.Position(0, 18), {} as any) as vscode.Location;
 		assert.ok(location);
 		assert.strictEqual(location.uri.toString(), 'file:///User.java');
+	});
+
+	test('definition provider navigates nested JPQL properties to their owning entity', async () => {
+		const categoryDoc = {
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///Category.java'),
+			getText: () => '@Entity public class Category { private Long id; }',
+		} as any;
+		const productDoc = {
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///Product.java'),
+			getText: () => '@Entity public class Product { private Category category; }',
+		} as any;
+		const index = WorkspaceEntityIndex.getInstance();
+		index.updateDocument(categoryDoc);
+		index.updateDocument(productDoc);
+
+		const text = '@Query("SELECT p FROM Product p WHERE p.category.id = :id") List<Product> find(@Param("id") Long id);';
+		const idOffset = text.indexOf('category.id') + 'category.'.length;
+		const repoDoc = {
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///ProductRepository.java'),
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: () => idOffset,
+			positionAt: () => new vscode.Position(0, idOffset),
+			getWordRangeAtPosition: () => new vscode.Range(new vscode.Position(0, idOffset), new vscode.Position(0, idOffset + 2)),
+		} as any;
+
+		const location = await new SpringJpaDefinitionProvider().provideDefinition(repoDoc, new vscode.Position(0, idOffset), {} as any) as vscode.Location;
+		assert.ok(location);
+		assert.strictEqual(location.uri.toString(), 'file:///Category.java');
 	});
 
 	// ==========================================

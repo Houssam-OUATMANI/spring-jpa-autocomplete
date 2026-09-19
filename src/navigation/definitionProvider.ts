@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { findEntityProperties, resolveEntityPropertyPath, WorkspaceEntityIndex } from '../entityDiscovery';
+import { findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 
@@ -62,11 +62,11 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 				if (entityName) {
 					const entity = entityMap.get(entityName.toLowerCase());
 					if (entity) {
-						const prop = resolveEntityPropertyPath(entity, propAccess.property, entityMap);
-						if (prop && prop.location) {
+						const resolved = resolveEntityPropertyPathWithOwner(entity, propAccess.property, entityMap);
+						if (resolved?.property.location) {
 							return new vscode.Location(
-								entity.uri,
-								new vscode.Position(prop.location.line, prop.location.character),
+								resolved.owner.uri,
+								new vscode.Position(resolved.property.location.line, resolved.property.location.character),
 							);
 						}
 					}
