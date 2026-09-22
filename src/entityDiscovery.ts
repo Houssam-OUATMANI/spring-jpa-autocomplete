@@ -110,6 +110,33 @@ export function extractRepositoryEntityNames(text: string): string[] {
 	return [...text.matchAll(REPOSITORY_ENTITY)].map((match) => match[1]);
 }
 
+export function extractRepositoryEntityNameAt(text: string, offset: number): string | undefined {
+	let selected: string | undefined;
+	for (const match of text.matchAll(REPOSITORY_ENTITY)) {
+		if ((match.index ?? 0) > offset) {
+			break;
+		}
+		selected = match[1];
+	}
+	return selected;
+}
+
+export function createEntityLookup(
+	entities: readonly EntityInfo[],
+	preferredPackage?: string,
+): Map<string, EntityInfo> {
+	const lookup = new Map<string, EntityInfo>();
+	for (const entity of entities) {
+		const key = entity.name.toLowerCase();
+		if (preferredPackage && entity.packageName === preferredPackage) {
+			lookup.set(key, entity);
+		} else if (!lookup.has(key)) {
+			lookup.set(key, entity);
+		}
+	}
+	return lookup;
+}
+
 export async function discoverEntities(currentDocument: vscode.TextDocument): Promise<readonly EntityInfo[]> {
 	const index = WorkspaceEntityIndex.getInstance();
 	await index.ensureInitialized();
@@ -134,8 +161,9 @@ export function clearEntityCache(): void {
 export function findEntityProperties(
 	repositoryText: string,
 	entities: readonly EntityInfo[],
+	repositoryEntityName?: string,
 ): readonly EntityProperty[] {
-	const names = extractRepositoryEntityNames(repositoryText);
+	const names = repositoryEntityName ? [repositoryEntityName] : extractRepositoryEntityNames(repositoryText);
 	const repositoryPackage = repositoryText.match(PACKAGE_DECLARATION)?.[1];
 	const namedEntities = names.length > 0
 		? entities.filter((entity) => names.includes(entity.name))
@@ -146,7 +174,7 @@ export function findEntityProperties(
 	const selected = samePackage.length > 0 ? samePackage : namedEntities;
 
 	const properties = new Map<string, EntityProperty>();
-	const entitiesByName = new Map(entities.map((entity) => [entity.name, entity]));
+	const entitiesByName = createEntityLookup(entities, repositoryPackage);
 
 	for (const entity of selected) {
 		const fullEntity = resolveEntityHierarchy(entity, entitiesByName);
@@ -233,7 +261,7 @@ function addEntityProperties(
 
 		const referencedNames = property.targetEntity ? [property.targetEntity] : referencedEntityNames(property.type);
 		for (const referencedEntityName of referencedNames) {
-			const referencedEntity = entitiesByName.get(referencedEntityName);
+			const referencedEntity = findEntityByName(entitiesByName, referencedEntityName);
 			if (referencedEntity) {
 				const resolvedReferenced = resolveEntityHierarchy(referencedEntity, entitiesByName);
 				addEntityProperties(resolvedReferenced, camelName, nextAncestors, properties, entitiesByName);

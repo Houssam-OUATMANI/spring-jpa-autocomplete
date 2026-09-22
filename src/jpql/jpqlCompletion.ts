@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { EntityInfo } from '../entityModel';
-import { referencedEntityNames, resolveEntityHierarchy, resolveEntityPropertyPath } from '../entityDiscovery';
+import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy, resolveEntityPropertyPath } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
 import { JPQL_KEYWORDS } from './jpqlLanguage';
 
@@ -26,6 +26,12 @@ export function createJpqlCompletions(
 		if (!/@Query\s*\([^)\n]*["'][^"'\n]*$/.test(linePrefix)) {
 			return undefined;
 		}
+		if (/\bnativeQuery\s*=\s*true\b/.test(linePrefix)) {
+			return undefined;
+		}
+	}
+	if (activeQuery?.isNative) {
+		return undefined;
 	}
 
 	const items: vscode.CompletionItem[] = [];
@@ -50,7 +56,7 @@ export function createJpqlCompletions(
 			}
 		}
 
-		const entityMap = new Map(entities.map((e) => [e.name.toLowerCase(), e]));
+		const entityMap = createEntityLookup(entities, activeQuery?.repositoryPackage);
 		let targetEntity = targetEntityName
 			? entityMap.get(targetEntityName.toLowerCase())
 			: entities[0]; // fallback to first entity if only 1
@@ -63,7 +69,7 @@ export function createJpqlCompletions(
 		}
 
 		if (targetEntity) {
-			const resolvedTarget = resolveEntityHierarchy(targetEntity, new Map(entities.map((entity) => [entity.name, entity])));
+			const resolvedTarget = resolveEntityHierarchy(targetEntity, createEntityLookup(entities, activeQuery?.repositoryPackage));
 			for (const prop of resolvedTarget.properties) {
 				if (!partial || prop.name.toLowerCase().startsWith(partial.toLowerCase())) {
 					const item = new vscode.CompletionItem(prop.name, vscode.CompletionItemKind.Field);

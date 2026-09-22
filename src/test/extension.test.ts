@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel } from '../entityModel';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
@@ -409,6 +409,35 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(validateJpql(query, [postEntity]).some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'), false);
 	});
 
+	test('parses concatenated @Query values without adding source text and preserves offsets', () => {
+		const text = '@Query("SELECT u FROM User u" + " WHERE u.id = :id") User find(@Param(value = "id") Long id);';
+		const user = { name: 'User', uri: vscode.Uri.parse('file:///User.java'), properties: [{ name: 'id', type: 'Long' }] };
+		const query = extractAllJpqlQueries(text, [user])[0];
+		assert.strictEqual(query.queryContent, 'SELECT u FROM User u WHERE u.id = :id');
+		assert.strictEqual(query.methodSignature?.parameters.length, 1);
+		assert.strictEqual(query.methodSignature?.parameters[0].paramName, 'id');
+		assert.strictEqual(query.namedParameters[0].startOffset, text.indexOf(':id'));
+	});
+
+	test('splits generic Java parameters at top level and ignores commented @Query annotations', () => {
+		const text = '// @Query("SELECT broken FROM Broken broken") User ignored();\n'
+			+ '@Query("SELECT u FROM User u WHERE u.id IN :ids") User find(Map<String, Object> filters, @Param("ids") List<Long> ids);';
+		const user = { name: 'User', uri: vscode.Uri.parse('file:///User.java'), properties: [{ name: 'id', type: 'Long' }] };
+		const queries = extractAllJpqlQueries(text, [user]);
+		assert.strictEqual(queries.length, 1);
+		assert.deepStrictEqual(queries[0].methodSignature?.parameters.map((parameter) => parameter.type), ['Map<String, Object>', 'List<Long>']);
+		assert.strictEqual(queries[0].methodSignature?.parameters[1].paramName, 'ids');
+	});
+
+	test('extracts value instead of countQuery and respects repository package for duplicate entities', () => {
+		const text = 'package com.second; @Query(countQuery = "SELECT COUNT(u) FROM User u", value = "SELECT u FROM User u") User find();';
+		const first = parseEntityModel('package com.first; @Entity class User { String first; }', vscode.Uri.parse('file:///first/User.java'))!;
+		const second = parseEntityModel('package com.second; @Entity class User { String second; }', vscode.Uri.parse('file:///second/User.java'))!;
+		const query = extractAllJpqlQueries(text, [first, second])[0];
+		assert.strictEqual(query.queryContent, 'SELECT u FROM User u');
+		assert.strictEqual(validateJpql(query, [first, second]).length, 0);
+	});
+
 	test('exposes the standard JPQL function vocabulary', () => {
 		assert.ok(JPQL_FUNCTIONS.includes('CONCAT'));
 		assert.ok(JPQL_FUNCTIONS.includes('CURRENT_TIMESTAMP'));
@@ -489,6 +518,26 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(index.getAllEntities().length, 1);
 		assert.strictEqual(index.getAllEntities()[0].properties[0].name, 'first');
 		index.clear();
+	});
+
+	test('selects the repository entity nearest to the method in a multi-repository file', () => {
+		const text = 'interface UserRepository extends JpaRepository<User, Long> { }\n'
+			+ 'interface OrderRepository extends JpaRepository<Order, Long> { }';
+		const user = { name: 'User', properties: [{ name: 'email', type: 'String' }], uri: vscode.Uri.parse('file:///User.java') };
+		const order = { name: 'Order', properties: [{ name: 'number', type: 'String' }], uri: vscode.Uri.parse('file:///Order.java') };
+		assert.strictEqual(extractRepositoryEntityNameAt(text, text.length), 'Order');
+		assert.deepStrictEqual(findEntityProperties(text, [user, order], 'Order').map((property) => property.name), ['number']);
+	});
+
+	test('does not offer JPQL completion inside native queries', () => {
+		const text = '@Query(value = "SELECT * FROM users", nativeQuery = true) List<User> findAll();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const completions = createJpqlCompletions(document, new vscode.Position(0, text.indexOf('users') + 5), [{ name: 'User', properties: [], uri: vscode.Uri.parse('file:///User.java') }]);
+		assert.strictEqual(completions, undefined);
 	});
 
 	test('prioritizes derived property suggestions over operators', () => {

@@ -4,6 +4,24 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.8.0] - 2026-09-22
+
+### Added
+
+- Added a shared Java parameter parser supporting nested generic types, varargs, modifiers, and `@Param(value = "...")`.
+- Added Java-aware `@Query` extraction that ignores comments and Java strings while locating annotations.
+- Added source-offset mapping for concatenated query literals.
+- Added package-aware JPQL entity resolution and repository-local property selection for files containing multiple repositories.
+- Added regression tests for concatenated queries, `countQuery`, duplicate entities, generic parameters, comments, and native SQL.
+
+### Fixed
+
+- Fixed concatenated `@Query` values being joined with an artificial space.
+- Fixed JPQL parameter parsing being split by commas inside generic types.
+- Fixed `countQuery` literals being mixed with the main query.
+- Fixed JPQL completion appearing inside native SQL queries.
+- Fixed derived-query diagnostics being limited to interfaces whose name ends in `Repository`.
+
 ## [0.7.0] - 2026-09-19
 
 ### Added

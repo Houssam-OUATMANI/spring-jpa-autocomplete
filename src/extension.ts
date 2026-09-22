@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { clearEntityCache, discoverEntities, findEntityProperties, WorkspaceEntityIndex } from './entityDiscovery';
+import { clearEntityCache, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, WorkspaceEntityIndex } from './entityDiscovery';
 import { isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from './jpaKeywords';
 import { createKeywordItem } from './legacyHelpers';
 import { createDerivedQueryCompletions } from './derivedQuery/queryCompletion';
@@ -12,6 +12,7 @@ import { SpringJpaHoverProvider } from './navigation/hoverProvider';
 import { SpringJpaCodeLensProvider } from './navigation/codeLensProvider';
 import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
+import { parseJavaParameters } from './javaParsing';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -50,7 +51,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 		const entities = await discoverEntities(editor.document);
-		const properties = findEntityProperties(editor.document.getText(), entities);
+		const properties = findEntityProperties(editor.document.getText(), entities, repositoryMatch[1]);
 		const selectedWord = editor.document.getText(editor.document.getWordRangeAtPosition(editor.selection.active) ?? new vscode.Range(editor.selection.active, editor.selection.active));
 		const property = properties.find((candidate) => candidate.name.toLowerCase() === selectedWord.toLowerCase());
 		if (!property) {
@@ -166,7 +167,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 
 				// B. Derived Query & Keyword Completion
-				const properties = findEntityProperties(document.getText(), entities);
+				const properties = findEntityProperties(document.getText(), entities, extractRepositoryEntityNameAt(document.getText(), document.offsetAt(position)));
 				const derivedItems = createDerivedQueryCompletions(linePrefix, properties, position);
 				if (derivedItems.length > 0) {
 					return derivedItems;
@@ -237,12 +238,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const started = Date.now();
 		const entities = await discoverEntities(document);
-		const properties = findEntityProperties(document.getText(), entities);
 		const documentDiagnostics: vscode.Diagnostic[] = [];
 		const docText = document.getText();
 
 		// Check if current file is a repository interface
-		const isRepo = /\binterface\s+\w+Repository\b/.test(docText);
+		const isRepo = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
 
 		if (isRepo) {
 			// A. Derived Query Methods Diagnostics (Validation of signature, return types, parameters, properties)
@@ -257,6 +257,7 @@ export function activate(context: vscode.ExtensionContext) {
 				const startOffset = methodMatch.index;
 				const endOffset = methodMatch.index + fullText.length;
 
+				const properties = findEntityProperties(docText, entities, extractRepositoryEntityNameAt(docText, startOffset));
 				const parameters = parseMethodParameters(paramsText);
 				const sig: MethodSignatureInfo = {
 					rawText: fullText,
@@ -354,57 +355,7 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function parseMethodParameters(paramsText: string): { name: string; type: string }[] {
-	if (!paramsText.trim()) {
-		return [];
-	}
-	return splitTopLevelParameters(paramsText).map((p) => {
-		const trimmed = p.trim();
-		const match = trimmed.match(/([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)$/);
-		if (match) {
-			return { type: match[1].trim(), name: match[2] };
-		}
-		return { type: 'Object', name: trimmed };
-	});
-}
-
-function splitTopLevelParameters(paramsText: string): string[] {
-	const parameters: string[] = [];
-	let start = 0;
-	let angleDepth = 0;
-	let parenthesisDepth = 0;
-	let bracketDepth = 0;
-
-	for (let index = 0; index < paramsText.length; index++) {
-		switch (paramsText[index]) {
-			case '<':
-				angleDepth++;
-				break;
-			case '>':
-				angleDepth = Math.max(0, angleDepth - 1);
-				break;
-			case '(':
-				parenthesisDepth++;
-				break;
-			case ')':
-				parenthesisDepth = Math.max(0, parenthesisDepth - 1);
-				break;
-			case '[':
-				bracketDepth++;
-				break;
-			case ']':
-				bracketDepth = Math.max(0, bracketDepth - 1);
-				break;
-			case ',':
-				if (angleDepth === 0 && parenthesisDepth === 0 && bracketDepth === 0) {
-					parameters.push(paramsText.slice(start, index));
-					start = index + 1;
-				}
-				break;
-		}
-	}
-
-	parameters.push(paramsText.slice(start));
-	return parameters;
+	return parseJavaParameters(paramsText).map(({ name, type }) => ({ name, type }));
 }
 
 export function deactivate() { }

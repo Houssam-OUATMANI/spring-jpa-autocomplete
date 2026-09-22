@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 
@@ -39,8 +39,8 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 			const access = query.propertyAccesses.find((candidate) => offset >= candidate.startOffset && offset <= candidate.endOffset);
 			if (access) {
 				const entityName = query.aliases.get(access.alias);
-				const target = entities.find((candidate) => candidate.name.toLowerCase() === entityName?.toLowerCase());
-				const resolved = target && resolveEntityPropertyPathWithOwner(target, access.property, new Map(entities.map((candidate) => [candidate.name, candidate])));
+				const target = createEntityLookup(entities, query.repositoryPackage).get(entityName?.toLowerCase() ?? '');
+				const resolved = target && resolveEntityPropertyPathWithOwner(target, access.property, createEntityLookup(entities, query.repositoryPackage));
 				if (resolved) {
 					return new vscode.Hover(new vscode.MarkdownString(formatProperty(resolved.property.name, resolved.property.type, resolved.property.relation, resolved.owner.name)), wordRange);
 				}

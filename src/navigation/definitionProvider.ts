@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 
@@ -12,7 +12,8 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
 		const entities = index.getAllEntities();
-		const entityMap = new Map(entities.map((e) => [e.name.toLowerCase(), e]));
+		const repositoryPackage = document.getText().match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
+		const entityMap = createEntityLookup(entities, repositoryPackage);
 
 		const lineText = document.lineAt(position.line).text;
 		const wordRange = document.getWordRangeAtPosition(position);
@@ -101,7 +102,7 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 				if (predicate) {
 					// Match property in target entity
 					const cleanedPropName = predicate.propertyName.replace(/_/g, '').toLowerCase();
-					const accessibleProperties = findEntityProperties(docText, entities);
+					const accessibleProperties = findEntityProperties(docText, entities, extractRepositoryEntityNameAt(docText, methodStart));
 					const prop = accessibleProperties.find(
 						(p) => p.name.replace(/_/g, '').toLowerCase() === cleanedPropName,
 					);

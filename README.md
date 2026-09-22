@@ -31,6 +31,10 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Table and alias resolution for `FROM ... JOIN ...` clauses, including chained joins.
   - Alias property completion (`u.` and `r.`), nested path completion (`p.category.` suggests `Category` properties), nested paths (`u.address.city`), and parameter completion (`:`).
   - Inherited property resolution in JPQL aliases.
+  - Java-aware `@Query` extraction that ignores comments and Java strings, supports concatenated values, and preserves source offsets.
+  - Support for `@Query(value = ..., countQuery = ...)` without mixing the two queries.
+  - Native SQL detection: JPQL diagnostics and completion are disabled for `nativeQuery = true`.
+  - Package-aware entity resolution when classes share the same simple name.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
   - Return-type validation between the JPQL `SELECT` entity and the repository method, including collection, optional, page, and slice results.
   - JPQL vocabulary and completion for clauses, operators, aggregates, string, numeric, temporal, collection, type, and custom functions.
@@ -60,6 +64,7 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, `springJpa.includeTestSources`, and `springJpa.enableCodeLens` in VS Code settings.
 - **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.
 - **Debounced diagnostics**: Java diagnostics are delayed briefly while typing to avoid repeated analysis.
+- **Repository context**: diagnostics and derived-query completion use the repository entity nearest to the current method, including files containing multiple repositories.
 
 ## Usage
 
@@ -96,7 +101,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.7.0` release includes the features and fixes listed in the changelog above.
+The extension version is maintained in `package.json`. The `0.8.0` release includes the parser, entity-resolution, native-query, and repository-context fixes listed in the changelog above.
 
 ## Requirements
 

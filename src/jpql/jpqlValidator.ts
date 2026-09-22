@@ -1,6 +1,6 @@
 import { EntityInfo } from '../entityModel';
 import { JpqlQueryInfo } from './jpqlParser';
-import { resolveEntityPropertyPath } from '../entityDiscovery';
+import { createEntityLookup, resolveEntityPropertyPath } from '../entityDiscovery';
 import { findClosestProperty } from '../propertySuggestions';
 
 export interface JpqlDiagnostic {
@@ -17,7 +17,7 @@ export function validateJpql(
 	knownEntities: readonly EntityInfo[],
 ): readonly JpqlDiagnostic[] {
 	const diagnostics: JpqlDiagnostic[] = [];
-	const entityMap = new Map(knownEntities.map((e) => [e.name.toLowerCase(), e]));
+	const entityMap = createEntityLookup(knownEntities, queryInfo.repositoryPackage);
 
 	// 1. Validate entities (skip if native SQL)
 	if (!queryInfo.isNative && knownEntities.length > 0) {
@@ -143,10 +143,7 @@ function findParameterPropertyType(
 ): string | undefined {
 	const precedingAccesses = queryInfo.propertyAccesses
 		.filter((access) => access.endOffset <= namedParameter.startOffset)
-		.filter((access) => /^[\s=<>!+*/-]*$/.test(queryInfo.queryContent.slice(
-			access.endOffset - queryInfo.queryStartOffset,
-			namedParameter.startOffset - queryInfo.queryStartOffset,
-		)));
+		.filter((access) => /^[\s=<>!+*/-]*$/.test(queryInfo.queryContent.slice(access.contentEnd, namedParameter.contentStart)));
 	const access = precedingAccesses[precedingAccesses.length - 1];
 	if (!access) {
 		return undefined;
