@@ -3,7 +3,7 @@
   "displayName": "Spring Data JPA Tools",
   "publisher": "houssam-ouatmani",
   "description": "Spring Data JPA autocomplete, JPQL validation, entity relations, navigation, and diagnostics for Java repositories.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "icon": "thumbnail.png",
   "galleryBanner": {
     "color": "#0b1f3a",

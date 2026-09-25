@@ -4,7 +4,7 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
+## [0.9.0] - 2026-09-25
 
 ### Added
 
