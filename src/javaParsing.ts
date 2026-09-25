@@ -12,7 +12,7 @@ export interface JavaParameterPart {
 }
 
 export function maskJavaSource(text: string): string {
-	const chars = [...text];
+	const chars = text.split('');
 	let mode: 'lineComment' | 'blockComment' | 'string' | 'char' | 'textBlock' | undefined;
 
 	for (let index = 0; index < text.length; index++) {

@@ -9,7 +9,7 @@ const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
 	private entitiesByUri = new Map<string, EntityInfo>();
-	private entitiesByName = new Map<string, EntityInfo>();
+	private entitiesByName = new Map<string, EntityInfo[]>();
 	private isInitialized = false;
 	private initPromise: Promise<void> | undefined;
 
@@ -57,8 +57,13 @@ export class WorkspaceEntityIndex {
 		this.rebuildNameIndex();
 	}
 
-	public getEntity(name: string): EntityInfo | undefined {
-		return this.entitiesByName.get(name);
+	public getEntity(name: string, preferredPackage?: string): EntityInfo | undefined {
+		const matches = this.entitiesByName.get(name.toLowerCase()) ?? [];
+		return matches.find((entity) => entity.packageName === preferredPackage) ?? matches[0];
+	}
+
+	public hasUri(uri: vscode.Uri): boolean {
+		return this.entitiesByUri.has(uri.toString());
 	}
 
 	public getAllEntities(): readonly EntityInfo[] {
@@ -74,16 +79,19 @@ export class WorkspaceEntityIndex {
 				? '**/{node_modules,target,build,out,.gradle}/**'
 				: '**/{node_modules,target,build,out,.gradle,src/test}/**';
 			const files = await vscode.workspace.findFiles('**/*.java', excluded);
-			for (const uri of files) {
-				try {
-					const document = await vscode.workspace.openTextDocument(uri);
-					const entity = parseEntityModel(document.getText(), document.uri);
-					if (entity) {
-						this.entitiesByUri.set(uri.toString(), entity);
-						this.entitiesByName.set(entity.name, entity);
+			for (let offset = 0; offset < files.length; offset += 32) {
+				const batch = await Promise.all(files.slice(offset, offset + 32).map(async (uri) => {
+					try {
+						const document = await vscode.workspace.openTextDocument(uri);
+						return parseEntityModel(document.getText(), document.uri);
+					} catch {
+						return undefined;
 					}
-				} catch {
-					// Ignore unreadable files
+				}));
+				for (const entity of batch) {
+					if (entity) {
+						this.entitiesByUri.set(entity.uri.toString(), entity);
+					}
 				}
 			}
 		} finally {
@@ -95,9 +103,8 @@ export class WorkspaceEntityIndex {
 	private rebuildNameIndex(): void {
 		this.entitiesByName.clear();
 		for (const entity of this.entitiesByUri.values()) {
-			if (!this.entitiesByName.has(entity.name)) {
-				this.entitiesByName.set(entity.name, entity);
-			}
+			const key = entity.name.toLowerCase();
+			this.entitiesByName.set(key, [...(this.entitiesByName.get(key) ?? []), entity]);
 		}
 	}
 }
@@ -124,14 +131,27 @@ export function extractRepositoryEntityNameAt(text: string, offset: number): str
 export function createEntityLookup(
 	entities: readonly EntityInfo[],
 	preferredPackage?: string,
+	sourceText?: string,
 ): Map<string, EntityInfo> {
 	const lookup = new Map<string, EntityInfo>();
+	const priorities = new Map<string, number>();
+	const imports = new Map<string, string>();
+	for (const match of sourceText?.matchAll(/\bimport\s+([\w.]+)\s*;/g) ?? []) {
+		const qualifiedName = match[1];
+		imports.set(qualifiedName.split('.').pop()!.toLowerCase(), qualifiedName);
+	}
 	for (const entity of entities) {
 		const key = entity.name.toLowerCase();
-		if (preferredPackage && entity.packageName === preferredPackage) {
+		const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
+		lookup.set(qualifiedName.toLowerCase(), entity);
+		const priority = imports.get(key)?.toLowerCase() === qualifiedName.toLowerCase()
+			? 3
+			: preferredPackage && entity.packageName === preferredPackage
+				? 2
+				: 1;
+		if ((priorities.get(key) ?? 0) < priority) {
 			lookup.set(key, entity);
-		} else if (!lookup.has(key)) {
-			lookup.set(key, entity);
+			priorities.set(key, priority);
 		}
 	}
 	return lookup;
@@ -171,10 +191,18 @@ export function findEntityProperties(
 	const samePackage = repositoryPackage
 		? namedEntities.filter((entity) => entity.packageName === repositoryPackage)
 		: [];
-	const selected = samePackage.length > 0 ? samePackage : namedEntities;
+	const importedTypes = new Set([...repositoryText.matchAll(/\bimport\s+([\w.]+)\s*;/g)].map((match) => match[1].toLowerCase()));
+	const explicitlyImported = namedEntities.filter((entity) =>
+		importedTypes.has(`${entity.packageName ? `${entity.packageName}.` : ''}${entity.name}`.toLowerCase()),
+	);
+	const selected = explicitlyImported.length > 0
+		? explicitlyImported
+		: samePackage.length > 0
+			? samePackage
+			: namedEntities;
 
 	const properties = new Map<string, EntityProperty>();
-	const entitiesByName = createEntityLookup(entities, repositoryPackage);
+	const entitiesByName = createEntityLookup(entities, repositoryPackage, repositoryText);
 
 	for (const entity of selected) {
 		const fullEntity = resolveEntityHierarchy(entity, entitiesByName);

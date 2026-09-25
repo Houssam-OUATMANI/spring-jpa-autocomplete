@@ -260,6 +260,8 @@ function findProperty(name: string, map: Map<string, EntityProperty>): EntityPro
 }
 
 function uncapitalize(val: string): string {
-	if (!val) return val;
+	if (!val) {
+		return val;
+	}
 	return val[0].toLowerCase() + val.slice(1);
 }

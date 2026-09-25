@@ -107,7 +107,9 @@ export function createDerivedQueryCompletions(
 }
 
 function toPascalCase(str: string): string {
-	if (!str) return str;
+	if (!str) {
+		return str;
+	}
 	// handle underscore like address_city -> Address_City or AddressCity
 	return str[0].toUpperCase() + str.slice(1);
 }

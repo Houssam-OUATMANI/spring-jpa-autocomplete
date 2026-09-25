@@ -16,6 +16,12 @@ import { parseJavaParameters } from './javaParsing';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
+export type DiagnosticDisplayMode = 'all' | 'errors' | 'warnings' | 'off';
+
+export function shouldDisplayDiagnostic(mode: DiagnosticDisplayMode, severity: 'error' | 'warning'): boolean {
+	return mode === 'all' || (mode === 'errors' && severity === 'error') || (mode === 'warnings' && severity === 'warning');
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	const entityIndex = WorkspaceEntityIndex.getInstance();
 	void entityIndex.ensureInitialized();
@@ -73,6 +79,20 @@ export function activate(context: vscode.ExtensionContext) {
 		if (!kind) {
 			return;
 		}
+		let returnType: string | undefined;
+		if (['find', 'read', 'get', 'query', 'search'].includes(kind.label)) {
+			const result = await vscode.window.showQuickPick([
+				{ label: 'Optional', description: `Optional<${repositoryMatch[1]}>` },
+				{ label: 'List', description: `List<${repositoryMatch[1]}>` },
+				{ label: 'Page', description: `Page<${repositoryMatch[1]}> with Pageable` },
+				{ label: 'Slice', description: `Slice<${repositoryMatch[1]}> with Pageable` },
+				{ label: 'Entity', description: repositoryMatch[1] },
+			], { placeHolder: 'Choose a return type' });
+			if (!result) {
+				return;
+			}
+			returnType = result.label === 'Entity' ? repositoryMatch[1] : `${result.label}<${repositoryMatch[1]}>`;
+		}
 		const operator = await vscode.window.showQuickPick([
 			{ label: 'Equals', description: 'Exact match' },
 			{ label: 'Containing', description: 'Contains text' },
@@ -97,6 +117,7 @@ export function activate(context: vscode.ExtensionContext) {
 			propertyType: property.type,
 			kind: kind.label as RepositoryMethodKind,
 			operator: operator.label as RepositoryQueryOperator,
+			returnType,
 		});
 		const closeBrace = editor.document.getText().lastIndexOf('}');
 		if (closeBrace < 0) {
@@ -104,17 +125,39 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		const edit = new vscode.WorkspaceEdit();
 		edit.insert(editor.document.uri, editor.document.positionAt(closeBrace), `\n\t${method}\n`);
-		if (['find', 'read', 'get', 'query', 'search'].includes(kind.label) && !/\bimport\s+java\.util\.Optional\s*;/.test(editor.document.getText())) {
-			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
-			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Optional;');
+		const imports = new Set<string>();
+		if (method.includes('Optional<')) {
+			imports.add('java.util.Optional');
 		}
-		if (['In', 'NotIn'].includes(operator.label) && !/\bimport\s+java\.util\.Collection\s*;/.test(editor.document.getText())) {
-			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
-			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.Collection;');
+		if (method.includes('Collection<')) {
+			imports.add('java.util.Collection');
 		}
-		if (kind.label === 'stream' && !/\bimport\s+java\.util\.stream\.Stream\s*;/.test(editor.document.getText())) {
-			const importOffset = editor.document.getText().startsWith('package ') ? editor.document.getText().indexOf(';') + 1 : 0;
-			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), '\n\nimport java.util.stream.Stream;');
+		if (method.includes('List<')) {
+			imports.add('java.util.List');
+		}
+		if (method.includes('Set<')) {
+			imports.add('java.util.Set');
+		}
+		if (method.includes('Stream<')) {
+			imports.add('java.util.stream.Stream');
+		}
+		if (method.includes('Page<')) {
+			imports.add('org.springframework.data.domain.Page');
+		}
+		if (method.includes('Slice<')) {
+			imports.add('org.springframework.data.domain.Slice');
+		}
+		if (method.includes('Pageable ')) {
+			imports.add('org.springframework.data.domain.Pageable');
+		}
+		const missingImports = [...imports].filter((importName) =>
+			!new RegExp(`\\bimport\\s+${importName.replaceAll('.', '\\.')}\\s*;`).test(editor.document.getText()),
+		);
+		if (missingImports.length > 0) {
+			const importOffset = editor.document.getText().startsWith('package ')
+				? editor.document.getText().indexOf(';') + 1
+				: 0;
+			edit.insert(editor.document.uri, editor.document.positionAt(importOffset), `\n\n${missingImports.map((importName) => `import ${importName};`).join('\n')}`);
 		}
 		await vscode.workspace.applyEdit(edit);
 	});
@@ -125,8 +168,12 @@ export function activate(context: vscode.ExtensionContext) {
 	watcher.onDidChange(async (uri) => {
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
+			const wasIndexed = entityIndex.hasUri(uri);
 			entityIndex.updateDocument(doc);
 			scheduleJavaDiagnostics(doc);
+			if (wasIndexed || entityIndex.hasUri(uri)) {
+				scheduleWorkspaceJavaDiagnostics();
+			}
 		} catch {
 			// ignore
 		}
@@ -134,14 +181,20 @@ export function activate(context: vscode.ExtensionContext) {
 	watcher.onDidCreate(async (uri) => {
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
+			const wasIndexed = entityIndex.hasUri(uri);
 			entityIndex.updateDocument(doc);
 			scheduleJavaDiagnostics(doc);
+			if (wasIndexed || entityIndex.hasUri(uri)) {
+				scheduleWorkspaceJavaDiagnostics();
+			}
 		} catch {
 			// ignore
 		}
 	});
 	watcher.onDidDelete((uri) => {
 		entityIndex.removeUri(uri);
+		diagnostics.delete(uri);
+		scheduleWorkspaceJavaDiagnostics();
 	});
 	context.subscriptions.push(watcher);
 
@@ -240,6 +293,8 @@ export function activate(context: vscode.ExtensionContext) {
 		const entities = await discoverEntities(document);
 		const documentDiagnostics: vscode.Diagnostic[] = [];
 		const docText = document.getText();
+		const derivedMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.derivedQueries', 'all');
+		const jpqlMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.jpql', 'all');
 
 		// Check if current file is a repository interface
 		const isRepo = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
@@ -270,6 +325,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 				const diags = validateDerivedMethodSignature(sig, properties);
 				for (const d of diags) {
+					if (!shouldDisplayDiagnostic(derivedMode, d.severity)) {
+						continue;
+					}
 					const start = document.positionAt(d.startOffset);
 					const end = document.positionAt(d.endOffset);
 					const severity = d.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
@@ -297,6 +355,9 @@ export function activate(context: vscode.ExtensionContext) {
 		for (const q of jpqlQueries) {
 			const jpqlDiags = validateJpql(q, entities);
 			for (const d of jpqlDiags) {
+				if (!shouldDisplayDiagnostic(jpqlMode, d.severity)) {
+					continue;
+				}
 				const start = document.positionAt(d.startOffset);
 				const end = document.positionAt(d.endOffset);
 				const severity = d.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
@@ -328,15 +389,39 @@ export function activate(context: vscode.ExtensionContext) {
 		}, Math.max(0, vscode.workspace.getConfiguration('springJpa').get<number>('diagnosticDebounceMs', 150))));
 	};
 
+	const scheduleWorkspaceJavaDiagnostics = () => {
+		for (const document of vscode.workspace.textDocuments) {
+			if (document.languageId === 'java') {
+				scheduleJavaDiagnostics(document);
+			}
+		}
+	};
+
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(refreshJavaDiagnostics));
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
+		if (document.languageId !== 'java') {
+			return;
+		}
+		const wasIndexed = entityIndex.hasUri(document.uri);
 		entityIndex.updateDocument(document);
 		scheduleJavaDiagnostics(document);
+		if (wasIndexed || entityIndex.hasUri(document.uri)) {
+			scheduleWorkspaceJavaDiagnostics();
+		}
 	}));
 	context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
 		if (document.languageId === 'java') {
+			const wasIndexed = entityIndex.hasUri(document.uri);
 			entityIndex.updateDocument(document);
 			void refreshJavaDiagnostics(document);
+			if (wasIndexed || entityIndex.hasUri(document.uri)) {
+				scheduleWorkspaceJavaDiagnostics();
+			}
+		}
+	}));
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
+		if (event.affectsConfiguration('springJpa')) {
+			scheduleWorkspaceJavaDiagnostics();
 		}
 	}));
 

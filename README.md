@@ -36,6 +36,8 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Native SQL detection: JPQL diagnostics and completion are disabled for `nativeQuery = true`.
   - Package-aware entity resolution when classes share the same simple name.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
+  - Positional query parameters (`?1` and legacy `?`) with signature/type validation, completion, and navigation.
+  - Constructor DTO projections via `SELECT NEW`, with DTO completion and return-type validation.
   - Return-type validation between the JPQL `SELECT` entity and the repository method, including collection, optional, page, and slice results.
   - JPQL vocabulary and completion for clauses, operators, aggregates, string, numeric, temporal, collection, type, and custom functions.
   - Syntax highlighting inside `@Query` strings and text blocks for clauses, entities, aliases, properties, parameters, operators, functions, literals, and numbers.
@@ -55,6 +57,7 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
 - **Repository generation**:
   - Run `Spring JPA: Generate Repository Method` with the cursor on a property to generate `findBy`, `readBy`, `getBy`, `queryBy`, `searchBy`, `streamBy`, `existsBy`, `countBy`, `deleteBy`, or `removeBy` methods.
   - Choose operators such as `Containing`, `In`, `NotIn`, `Between`, `GreaterThan`, `LessThan`, and null/boolean predicates.
+  - Choose `Optional`, `List`, `Page`, `Slice`, or the entity return type; paged signatures include `Pageable`.
 - **IDE assistance**:
   - Hover information for JPA entities, properties, and relations.
   - Contextual JPQL hover documentation for clauses, operators, and functions.
@@ -62,6 +65,7 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
 - **Index and performance controls**:
   - Run `Spring JPA: Rebuild Entity Index` after changing project structure.
   - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, `springJpa.includeTestSources`, and `springJpa.enableCodeLens` in VS Code settings.
+  - Configure `springJpa.diagnostics.derivedQueries` and `springJpa.diagnostics.jpql` independently with `all`, `errors`, `warnings`, or `off`.
 - **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.
 - **Debounced diagnostics**: Java diagnostics are delayed briefly while typing to avoid repeated analysis.
 - **Repository context**: diagnostics and derived-query completion use the repository entity nearest to the current method, including files containing multiple repositories.

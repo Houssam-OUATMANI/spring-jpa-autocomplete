@@ -7,7 +7,12 @@ export class Range {
 }
 
 export class Location {
-	constructor(public readonly uri: Uri, public readonly rangeOrPosition: Range | Position) {}
+	public readonly range: Range;
+	constructor(public readonly uri: Uri, public readonly rangeOrPosition: Range | Position) {
+		this.range = rangeOrPosition instanceof Position
+			? new Range(rangeOrPosition, rangeOrPosition)
+			: rangeOrPosition;
+	}
 }
 
 export class Uri {

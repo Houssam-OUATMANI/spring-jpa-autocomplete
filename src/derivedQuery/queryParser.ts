@@ -191,6 +191,9 @@ function parseOrderBy(orderByText: string): ParsedOrderBy[] {
 			direction: match[2] as 'Asc' | 'Desc',
 		});
 	}
+	if (results.length === 0 && /^[A-Za-z0-9_]+$/.test(orderByText)) {
+		results.push({ propertyName: orderByText, direction: 'Asc' });
+	}
 
 	return results;
 }

@@ -1,6 +1,5 @@
 import * as mockVscode from './mockVscode';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
 const Module = require('module');
 const origRequire = Module.prototype.require;
 Module.prototype.require = function (id: string, ...args: any[]) {
@@ -12,7 +11,6 @@ Module.prototype.require = function (id: string, ...args: any[]) {
 
 // Polyfill suite and test for node test runner if mocha is not loaded
 if (typeof (global as any).suite !== 'function') {
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
 	const nodeTest = require('node:test');
 	(global as any).suite = nodeTest.describe;
 	(global as any).test = nodeTest.it;

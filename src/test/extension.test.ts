@@ -4,7 +4,7 @@ import { extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntity
 import { parseEntityModel } from '../entityModel';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
-import { createKeywordItem, extractMethodParameterNames } from '../extension';
+import { createKeywordItem, extractMethodParameterNames, shouldDisplayDiagnostic } from '../extension';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 import { validateDerivedMethodSignature } from '../derivedQuery/queryValidator';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
@@ -17,6 +17,7 @@ import { generateRepositoryMethod } from '../repositoryGenerator';
 import { JPQL_FUNCTIONS, JPQL_KEYWORDS } from '../jpql/jpqlLanguage';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 import { createJpqlCompletions } from '../jpql/jpqlCompletion';
+import { maskJavaSource } from '../javaParsing';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -49,6 +50,13 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(isJpaPrefix('find'), true);
 		assert.strictEqual(isJpaPrefix('remove'), true);
 		assert.strictEqual(isJpaPrefix('banana'), false);
+	});
+
+	test('filters diagnostics by category display mode', () => {
+		assert.strictEqual(shouldDisplayDiagnostic('all', 'warning'), true);
+		assert.strictEqual(shouldDisplayDiagnostic('errors', 'warning'), false);
+		assert.strictEqual(shouldDisplayDiagnostic('warnings', 'warning'), true);
+		assert.strictEqual(shouldDisplayDiagnostic('off', 'error'), false);
 	});
 
 	// ==========================================
@@ -123,6 +131,38 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(entity.properties.map((p) => p.name), ['id', 'username', 'email']);
 	});
 
+	test('limits extracted entity properties to direct instance fields', () => {
+		const entity = parseEntityModel('@EntityGraph class NotAnEntity {}', vscode.Uri.parse('file:///NotAnEntity.java'));
+		assert.strictEqual(entity, undefined);
+
+		const parsed = parseEntityModel(`
+			package p;
+			// @Entity class Fake {}
+			@Entity
+			class User {
+				static String cache;
+				String name;
+				void work() { String localName = "x"; }
+				class Nested { String nestedOnly; }
+			}
+		`, vscode.Uri.parse('file:///User.java'))!;
+		assert.deepStrictEqual(parsed.properties.map((property) => property.name), ['name']);
+	});
+
+	test('associates JPA annotations with the following class declaration', () => {
+		const parsed = parseEntityModel('class Helper { String helper; } @Entity class User { String email; }', vscode.Uri.parse('file:///User.java'))!;
+		assert.strictEqual(parsed.name, 'User');
+		assert.deepStrictEqual(parsed.properties.map((property) => property.name), ['email']);
+	});
+
+	test('parses record components with nested generic types', () => {
+		const entity = parseEntityModel('record Result(Map<String, List<Long>> values, String name) {}', vscode.Uri.parse('file:///Result.java'))!;
+		assert.deepStrictEqual(entity.properties.map((property) => [property.name, property.type]), [
+			['values', 'Map<String, List<Long>>'],
+			['name', 'String'],
+		]);
+	});
+
 	test('inherits properties from @MappedSuperclass', () => {
 		const baseEntity = parseEntityModel(`
 			@MappedSuperclass
@@ -165,6 +205,13 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(properties.map((property) => property.name), ['second']);
 	});
 
+	test('prefers an explicit entity import when repository packages differ', () => {
+		const first = parseEntityModel('package com.first; @Entity class User { String first; }', vscode.Uri.parse('file:///first/User.java'))!;
+		const second = parseEntityModel('package com.second; @Entity class User { String second; }', vscode.Uri.parse('file:///second/User.java'))!;
+		const repository = 'package com.repository; import com.second.User; interface UserRepository extends JpaRepository<User, Long> {}';
+		assert.deepStrictEqual(findEntityProperties(repository, [first, second]).map((property) => property.name), ['second']);
+	});
+
 	test('recognizes projection interfaces and suggests close property names', () => {
 		const projection = parseEntityModel('package com.example; public interface UserView { String getEmail(); }', vscode.Uri.parse('file:///UserView.java'))!;
 		assert.strictEqual(projection.isProjection, true);
@@ -199,6 +246,12 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(parsed.orderBy.length, 1);
 		assert.strictEqual(parsed.orderBy[0].propertyName, 'CreatedAt');
 		assert.strictEqual(parsed.orderBy[0].direction, 'Desc');
+	});
+
+	test('parses OrderBy without an explicit direction as ascending', () => {
+		assert.deepStrictEqual(parseDerivedMethodName('findByEmailOrderByCreatedAt')?.orderBy, [
+			{ propertyName: 'CreatedAt', direction: 'Asc' },
+		]);
 	});
 
 	test('parses derived method with underscore property navigation', () => {
@@ -386,6 +439,71 @@ suite('Extension Test Suite', () => {
 		assert.ok(diagnostics.some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'));
 	});
 
+	test('checks JPQL collection element types and constructor DTO projections', () => {
+		const userEntity = parseEntityModel('@Entity class User { Long id; }', vscode.Uri.parse('file:///User.java'))!;
+		const wrongCollection = extractAllJpqlQueries('@Query("SELECT u FROM User u") List<String> find();', [userEntity])[0];
+		assert.ok(validateJpql(wrongCollection, [userEntity]).some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'));
+
+		const dtoQuery = extractAllJpqlQueries(
+			'@Query("SELECT NEW com.example.UserView(u.id) FROM User u") List<UserView> find();',
+			[userEntity],
+		)[0];
+		assert.strictEqual(dtoQuery.dtoProjectionType, 'com.example.UserView');
+		assert.strictEqual(validateJpql(dtoQuery, [userEntity]).some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'), false);
+	});
+
+	test('validates indexed JPQL positional parameters and ignores question marks in literals', () => {
+		const userEntity = parseEntityModel('@Entity class User { Long id; String name; }', vscode.Uri.parse('file:///User.java'))!;
+		const query = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = ?1 AND u.name = ?2 AND u.name <> \'?9:ignored\'") List<User> find(Long id, String name);',
+			[userEntity],
+		)[0];
+		assert.deepStrictEqual(query.positionalParameters.map((parameter) => parameter.index), [1, 2]);
+		assert.strictEqual(validateJpql(query, [userEntity]).length, 0);
+
+		const mismatch = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = ?1") User find(String id);',
+			[userEntity],
+		)[0];
+		assert.ok(validateJpql(mismatch, [userEntity]).some((diagnostic) => diagnostic.code === 'INVALID_PARAMETER_TYPE'));
+
+		const undeclared = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = :id") User find();',
+			[userEntity],
+		)[0];
+		assert.ok(validateJpql(undeclared, [userEntity]).some((diagnostic) => diagnostic.code === 'MISSING_METHOD_PARAM'));
+
+		const sequential = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = ? AND u.name = ?") List<User> find(Long id, String name);',
+			[userEntity],
+		)[0];
+		assert.deepStrictEqual(sequential.positionalParameters.map((parameter) => parameter.index), [1, 2]);
+		assert.strictEqual(validateJpql(sequential, [userEntity]).length, 0);
+	});
+
+	test('respects @Param aliases and rejects mixed JPQL parameter styles', () => {
+		const userEntity = parseEntityModel('@Entity class User { Long id; String name; }', vscode.Uri.parse('file:///User.java'))!;
+		const aliases = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = :userId AND u.name = :displayName") User find(@Param("userId") Long id, @Param("displayName") String name);',
+			[userEntity],
+		)[0];
+		assert.strictEqual(validateJpql(aliases, [userEntity]).length, 0);
+
+		const mixed = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = :id AND u.name = ?2") User find(@Param("id") Long id, String name);',
+			[userEntity],
+		)[0];
+		assert.ok(validateJpql(mixed, [userEntity]).some((diagnostic) => diagnostic.code === 'MIXED_PARAMETER_STYLE'));
+	});
+
+	test('uses imported duplicate entity and accepts fully-qualified collection return types', () => {
+		const first = parseEntityModel('package com.first; @Entity class User { String first; }', vscode.Uri.parse('file:///first/User.java'))!;
+		const second = parseEntityModel('package com.second; @Entity class User { String second; }', vscode.Uri.parse('file:///second/User.java'))!;
+		const text = 'package com.repository; import com.second.User; @Query("SELECT u FROM User u WHERE u.second = ?1") java.util.List<User> find(String second);';
+		const query = extractAllJpqlQueries(text, [first, second])[0];
+		assert.strictEqual(validateJpql(query, [first, second]).length, 0);
+	});
+
 	test('keeps nested JPQL functions inside @Query and preserves the entity return type', () => {
 		const documentText = `
 			@Query("""
@@ -427,6 +545,14 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(queries.length, 1);
 		assert.deepStrictEqual(queries[0].methodSignature?.parameters.map((parameter) => parameter.type), ['Map<String, Object>', 'List<Long>']);
 		assert.strictEqual(queries[0].methodSignature?.parameters[1].paramName, 'ids');
+	});
+
+	test('preserves Java source offsets after supplementary Unicode characters', () => {
+		const source = '// 😀 @Query("ignored")\n@Query("SELECT u FROM User u")';
+		const masked = maskJavaSource(source);
+		assert.strictEqual(masked.length, source.length);
+		assert.ok(!masked.slice(0, masked.indexOf('\n')).includes('@Query'));
+		assert.strictEqual(masked.indexOf('@Query'), source.lastIndexOf('@Query'));
 	});
 
 	test('extracts value instead of countQuery and respects repository package for duplicate entities', () => {
@@ -483,6 +609,36 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(completions?.find((item) => item.label === 'name')?.detail, 'Category.name : String');
 	});
 
+	test('completes the next JPQL positional parameter index', () => {
+		const user = parseEntityModel('@Entity class User { Long id; }', vscode.Uri.parse('file:///User.java'))!;
+		const text = '@Query("SELECT u FROM User u WHERE u.id = ?") User find(Long id);';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const position = new vscode.Position(0, text.indexOf('?') + 1);
+		const completions = createJpqlCompletions(document, position, [user]);
+		assert.deepStrictEqual(completions?.map((item) => item.label), ['?1']);
+	});
+
+	test('completes discovered DTOs after JPQL SELECT NEW', () => {
+		const user = parseEntityModel('@Entity class User { Long id; }', vscode.Uri.parse('file:///User.java'))!;
+		const dto = parseEntityModel('package com.example; record UserView(Long id) {}', vscode.Uri.parse('file:///UserView.java'))!;
+		const text = '@Query("SELECT NEW com.example.UserV(u.id) FROM User u") List<UserView> find();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const position = new vscode.Position(0, text.indexOf('UserV') + 'UserV'.length);
+		const completions = createJpqlCompletions(document, position, [user, dto]);
+		const dtoCompletion = completions?.find((item) => item.label === 'UserView');
+		assert.ok(dtoCompletion);
+		assert.strictEqual(dtoCompletion?.insertText, 'com.example.UserView');
+		assert.strictEqual((dtoCompletion?.range as vscode.Range | undefined)?.start.character, text.indexOf('com.example.UserV'));
+	});
+
 	test('resolves inherited and nested JPQL properties', () => {
 		const base = parseEntityModel('@MappedSuperclass class Audited { private String tenantId; }', vscode.Uri.parse('file:///Audited.java'))!;
 		const address = parseEntityModel('@Entity class Address { private String city; }', vscode.Uri.parse('file:///Address.java'))!;
@@ -511,9 +667,10 @@ suite('Extension Test Suite', () => {
 	test('keeps same-named entities from different URIs indexed independently', () => {
 		const index = WorkspaceEntityIndex.getInstance();
 		index.clear();
-		index.updateDocument({ languageId: 'java', uri: vscode.Uri.parse('file:///one/User.java'), getText: () => '@Entity class User { String first; }' } as any);
-		index.updateDocument({ languageId: 'java', uri: vscode.Uri.parse('file:///two/User.java'), getText: () => '@Entity class User { String second; }' } as any);
+		index.updateDocument({ languageId: 'java', uri: vscode.Uri.parse('file:///one/User.java'), getText: () => 'package com.one; @Entity class User { String first; }' } as any);
+		index.updateDocument({ languageId: 'java', uri: vscode.Uri.parse('file:///two/User.java'), getText: () => 'package com.two; @Entity class User { String second; }' } as any);
 		assert.strictEqual(index.getAllEntities().length, 2);
+		assert.strictEqual(index.getEntity('User', 'com.two')?.properties[0].name, 'second');
 		index.removeUri(vscode.Uri.parse('file:///two/User.java'));
 		assert.strictEqual(index.getAllEntities().length, 1);
 		assert.strictEqual(index.getAllEntities()[0].properties[0].name, 'first');
@@ -618,6 +775,8 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'active', propertyType: 'boolean', kind: 'remove' }), 'void removeByActive(boolean active);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'stream' }), 'Stream<User> streamByEmail(String email);');
 		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find', operator: 'IsNull' }), 'Optional<User> findByEmailIsNull();');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find', returnType: 'List<User>' }), 'List<User> findByEmail(String email);');
+		assert.strictEqual(generateRepositoryMethod({ entityName: 'User', propertyName: 'email', propertyType: 'String', kind: 'find', returnType: 'Page<User>' }), 'Page<User> findByEmail(String email, Pageable pageable);');
 	});
 
 	// ==========================================
@@ -676,6 +835,35 @@ suite('Extension Test Suite', () => {
 		const location = await new SpringJpaDefinitionProvider().provideDefinition(repoDoc, new vscode.Position(0, idOffset), {} as any) as vscode.Location;
 		assert.ok(location);
 		assert.strictEqual(location.uri.toString(), 'file:///Category.java');
+	});
+
+	test('definition provider navigates positional JPQL parameters to method arguments', async () => {
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear();
+		index.updateDocument({
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///User.java'),
+			getText: () => '@Entity class User { Long id; }',
+		} as any);
+		const text = '@Query("SELECT u FROM User u WHERE u.id = ?1") User find(Long id);';
+		const positionOffset = text.indexOf('?1') + 1;
+		const document = {
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///UserRepository.java'),
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+			getWordRangeAtPosition: () => new vscode.Range(new vscode.Position(0, positionOffset), new vscode.Position(0, positionOffset + 1)),
+		} as any;
+		const location = await new SpringJpaDefinitionProvider().provideDefinition(
+			document,
+			new vscode.Position(0, positionOffset),
+			{} as any,
+		) as vscode.Location;
+		assert.ok(location);
+		assert.strictEqual(location.range.start.character, text.indexOf('id);'));
+		index.clear();
 	});
 
 	// ==========================================

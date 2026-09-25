@@ -13,7 +13,7 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		await index.ensureInitialized();
 		const entities = index.getAllEntities();
 		const repositoryPackage = document.getText().match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
-		const entityMap = createEntityLookup(entities, repositoryPackage);
+		const entityMap = createEntityLookup(entities, repositoryPackage, document.getText());
 
 		const lineText = document.lineAt(position.line).text;
 		const wordRange = document.getWordRangeAtPosition(position);
@@ -40,6 +40,16 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		);
 
 		if (activeQuery) {
+			const positionalParam = activeQuery.positionalParameters.find(
+				(parameter) => offset >= parameter.startOffset && offset <= parameter.endOffset,
+			);
+			if (positionalParam && activeQuery.methodSignature) {
+				const methodParam = activeQuery.methodSignature.parameters[positionalParam.index - 1];
+				if (methodParam) {
+					return new vscode.Location(document.uri, document.positionAt(methodParam.startOffset));
+				}
+			}
+
 			// Check if clicking on named parameter :param
 			const param = activeQuery.namedParameters.find(
 				(p) => offset >= p.startOffset && offset <= p.endOffset,
@@ -85,14 +95,18 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 			if (position.character >= methodStart && position.character <= methodEnd) {
 				const methodName = methodMatch[0];
 				const parsed = parseDerivedMethodName(methodName);
-				if (!parsed) break;
+				if (!parsed) {
+					break;
+				}
 
 				// Find which entity this repository manages
 				const repoEntityMatch = docText.match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository)\s*<\s*([A-Z]\w*)/);
 				const targetEntityName = repoEntityMatch ? repoEntityMatch[1] : undefined;
 				const targetEntity = targetEntityName ? entityMap.get(targetEntityName.toLowerCase()) : entities[0];
 
-				if (!targetEntity) break;
+				if (!targetEntity) {
+					break;
+				}
 
 				const offsetInMethod = position.character - methodStart;
 				const predicate = parsed.predicates.find(

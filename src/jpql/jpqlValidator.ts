@@ -8,7 +8,7 @@ export interface JpqlDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE';
+	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE';
 	readonly paramName?: string;
 }
 
@@ -17,7 +17,7 @@ export function validateJpql(
 	knownEntities: readonly EntityInfo[],
 ): readonly JpqlDiagnostic[] {
 	const diagnostics: JpqlDiagnostic[] = [];
-	const entityMap = createEntityLookup(knownEntities, queryInfo.repositoryPackage);
+	const entityMap = createEntityLookup(knownEntities, queryInfo.repositoryPackage, queryInfo.repositoryImports.map((name) => `import ${name};`).join('\n'));
 
 	// 1. Validate entities (skip if native SQL)
 	if (!queryInfo.isNative && knownEntities.length > 0) {
@@ -61,18 +61,27 @@ export function validateJpql(
 	// 3. Validate named parameters vs method parameters
 	if (queryInfo.methodSignature) {
 		const methodParams = queryInfo.methodSignature.parameters;
-		const methodParamNames = new Set(
-			methodParams.map((p) => (p.paramName ?? p.name).toLowerCase()),
-		);
-
 		const queryParamNames = new Set<string>();
+		const usedMethodParameters = new Set<number>();
+		const hasNamed = queryInfo.namedParameters.length > 0;
+		const hasPositional = queryInfo.positionalParameters.length > 0;
+		if (hasNamed && hasPositional) {
+			const parameter = queryInfo.positionalParameters[0];
+			diagnostics.push({
+				message: 'A JPQL query cannot mix named and positional parameters.',
+				severity: 'error',
+				startOffset: parameter.startOffset,
+				endOffset: parameter.endOffset,
+				code: 'MIXED_PARAMETER_STYLE',
+			});
+		}
 
 		for (const namedParam of queryInfo.namedParameters) {
 			queryParamNames.add(namedParam.name.toLowerCase());
 			const methodParam = methodParams.find((parameter) =>
 				(parameter.paramName ?? parameter.name).toLowerCase() === namedParam.name.toLowerCase(),
 			);
-			if (methodParams.length > 0 && !methodParam) {
+			if (!methodParam) {
 				diagnostics.push({
 					message: `Named parameter ':${namedParam.name}' is not declared by method '${queryInfo.methodSignature.methodName}'.`,
 					severity: 'error',
@@ -82,6 +91,7 @@ export function validateJpql(
 					paramName: namedParam.name,
 				});
 			} else if (methodParam) {
+				usedMethodParameters.add(methodParams.indexOf(methodParam));
 				const propertyType = findParameterPropertyType(queryInfo, namedParam, entityMap);
 				if (propertyType && !areJpqlParameterTypesCompatible(propertyType, methodParam.type)) {
 					diagnostics.push({
@@ -99,7 +109,8 @@ export function validateJpql(
 		// Also check if any named parameter is missing @Param annotation when there are multiple parameters
 		if (methodParams.length > 1) {
 			for (const p of methodParams) {
-				if (!p.isParamAnnotated && queryParamNames.has(p.name.toLowerCase())) {
+				const effectiveName = (p.paramName ?? p.name).toLowerCase();
+				if (!p.isParamAnnotated && queryParamNames.has(effectiveName)) {
 					diagnostics.push({
 						message: `Method parameter '${p.name}' is used in @Query but missing '@Param(\"${p.name}\")' annotation.`,
 						severity: 'warning',
@@ -112,14 +123,40 @@ export function validateJpql(
 			}
 		}
 
+		for (const positionalParam of queryInfo.positionalParameters) {
+			const parameterIndex = positionalParam.index - 1;
+			const methodParam = methodParams[parameterIndex];
+			if (!methodParam || positionalParam.index < 1) {
+				diagnostics.push({
+					message: `Positional parameter '?${positionalParam.index}' has no matching method parameter.`,
+					severity: 'error',
+					startOffset: positionalParam.startOffset,
+					endOffset: positionalParam.endOffset,
+					code: 'MISSING_METHOD_PARAM',
+				});
+				continue;
+			}
+			usedMethodParameters.add(parameterIndex);
+			const propertyType = findParameterPropertyType(queryInfo, positionalParam, entityMap);
+			if (propertyType && !areJpqlParameterTypesCompatible(propertyType, methodParam.type)) {
+				diagnostics.push({
+					message: `Positional parameter '?${positionalParam.index}' expects type '${propertyType}', but method parameter '${methodParam.name}' has type '${methodParam.type}'.`,
+					severity: 'error',
+					startOffset: methodParam.startOffset,
+					endOffset: methodParam.endOffset,
+					code: 'INVALID_PARAMETER_TYPE',
+				});
+			}
+		}
+
 		// Check unused parameters (ignoring Pageable / Sort)
-		if (queryInfo.namedParameters.length > 0) {
-			for (const p of methodParams) {
+		if (hasNamed || hasPositional) {
+			for (const [index, p] of methodParams.entries()) {
 				if (['Pageable', 'Sort', 'Limit'].some((t) => p.type.includes(t))) {
 					continue;
 				}
 				const effectiveName = (p.paramName ?? p.name).toLowerCase();
-				if (!queryParamNames.has(effectiveName)) {
+				if (hasNamed ? !queryParamNames.has(effectiveName) : !usedMethodParameters.has(index)) {
 					diagnostics.push({
 						message: `Method parameter '${p.name}' is not used in the query.`,
 						severity: 'warning',
@@ -138,12 +175,12 @@ export function validateJpql(
 
 function findParameterPropertyType(
 	queryInfo: JpqlQueryInfo,
-	namedParameter: JpqlQueryInfo['namedParameters'][number],
+	namedParameter: JpqlQueryInfo['namedParameters'][number] | JpqlQueryInfo['positionalParameters'][number],
 	entityMap: Map<string, EntityInfo>,
 ): string | undefined {
 	const precedingAccesses = queryInfo.propertyAccesses
 		.filter((access) => access.endOffset <= namedParameter.startOffset)
-		.filter((access) => /^[\s=<>!+*/-]*$/.test(queryInfo.queryContent.slice(access.contentEnd, namedParameter.contentStart)));
+		.filter((access) => /^[\s(=<>!+*/-]*$/.test(queryInfo.queryContent.slice(access.contentEnd, namedParameter.contentStart)));
 	const access = precedingAccesses[precedingAccesses.length - 1];
 	if (!access) {
 		return undefined;
@@ -166,8 +203,8 @@ function areJpqlParameterTypesCompatible(propertyType: string, parameterType: st
 function normalizeJavaType(type: string): string {
 	return type
 		.replace(/^\?\s*(?:extends|super)\s+/, '')
-		.replace(/^.*\./, '')
-		.replace(/\s+/g, '');
+		.replace(/\s+/g, '')
+		.replace(/\b(?:java\.lang|java\.util|java\.util\.stream|org\.springframework\.data\.domain)\./g, '');
 }
 
 function validateReturnType(
@@ -175,31 +212,29 @@ function validateReturnType(
 	entityMap: Map<string, EntityInfo>,
 	diagnostics: JpqlDiagnostic[],
 ): void {
-	if (!queryInfo.methodSignature || !queryInfo.selectedAlias) {
+	if (!queryInfo.methodSignature || (!queryInfo.selectedAlias && !queryInfo.dtoProjectionType)) {
 		return;
 	}
-	if (!/^[A-Za-z_$][\w$]*(?:\s*<.*>)?(?:\[\])?$/.test(queryInfo.methodSignature.returnType.trim())) {
-		return;
-	}
-
-	const selectedEntityName = queryInfo.aliases.get(queryInfo.selectedAlias);
-	if (!selectedEntityName || !entityMap.has(selectedEntityName.toLowerCase())) {
+	if (!/^[\w$]+(?:\.[\w$]+)*(?:\s*<.*>)?(?:\[\])?$/.test(queryInfo.methodSignature.returnType.trim())) {
 		return;
 	}
 
-	const returnType = queryInfo.methodSignature.returnType.replace(/\s+/g, '');
-	const entityName = selectedEntityName;
-	const isCollection = /^(?:List|Set|Collection|Iterable|Stream)<.+>$/.test(returnType);
-	const isOptional = returnType === `Optional<${entityName}>`;
-	const isPage = returnType === `Page<${entityName}>` || returnType === `Slice<${entityName}>`;
-	const isEntity = returnType === entityName;
-	if (isCollection || isOptional || isPage || isEntity) {
+	const selectedType = queryInfo.dtoProjectionType ?? queryInfo.aliases.get(queryInfo.selectedAlias!);
+	if (!selectedType || (!queryInfo.dtoProjectionType && !entityMap.has(selectedType.toLowerCase()))) {
+		return;
+	}
+
+	const returnType = normalizeJavaType(queryInfo.methodSignature.returnType);
+	const expectedType = normalizeJavaType(selectedType).split('.').pop();
+	const containerType = returnType.match(/^(?:List|Set|Collection|Iterable|Stream|Page|Slice|Optional)<(.+)>$/)?.[1];
+	const actualType = normalizeJavaType(containerType ?? returnType).split('.').pop();
+	if (actualType === expectedType) {
 		return;
 	}
 
 	const returnStart = queryInfo.methodSignature.startOffset + queryInfo.rawQuery.indexOf(queryInfo.methodSignature.returnType);
 	diagnostics.push({
-		message: `JPQL query selects '${entityName}', but method returns '${queryInfo.methodSignature.returnType}'.`,
+		message: `JPQL query selects '${selectedType}', but method returns '${queryInfo.methodSignature.returnType}'.`,
 		severity: 'error',
 		startOffset: returnStart,
 		endOffset: returnStart + queryInfo.methodSignature.returnType.length,

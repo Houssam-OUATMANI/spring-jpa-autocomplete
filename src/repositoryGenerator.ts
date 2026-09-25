@@ -20,6 +20,10 @@ export function generateRepositoryMethod(input: RepositoryMethodGenerationInput)
 		: input.operator === 'Between'
 		? `${input.propertyType} ${input.propertyName}Start, ${input.propertyType} ${input.propertyName}End`
 		: `${parameterType} ${input.propertyName}`;
+	const pageableParameter = /^(?:Page|Slice)</.test(input.returnType ?? '')
+		? `${parameter ? ', ' : ''}Pageable pageable`
+		: '';
+	const parameters = `${parameter}${pageableParameter}`;
 
 	switch (input.kind) {
 		case 'exists':
@@ -33,15 +37,15 @@ export function generateRepositoryMethod(input: RepositoryMethodGenerationInput)
 		case 'stream':
 			return `Stream<${input.entityName}> streamBy${methodSuffix}(${parameter});`;
 		case 'read':
-			return `${input.returnType ?? `Optional<${input.entityName}>`} readBy${methodSuffix}(${parameter});`;
+			return `${input.returnType ?? `Optional<${input.entityName}>`} readBy${methodSuffix}(${parameters});`;
 		case 'get':
-			return `${input.returnType ?? `Optional<${input.entityName}>`} getBy${methodSuffix}(${parameter});`;
+			return `${input.returnType ?? `Optional<${input.entityName}>`} getBy${methodSuffix}(${parameters});`;
 		case 'query':
-			return `${input.returnType ?? `Optional<${input.entityName}>`} queryBy${methodSuffix}(${parameter});`;
+			return `${input.returnType ?? `Optional<${input.entityName}>`} queryBy${methodSuffix}(${parameters});`;
 		case 'search':
-			return `${input.returnType ?? `Optional<${input.entityName}>`} searchBy${methodSuffix}(${parameter});`;
+			return `${input.returnType ?? `Optional<${input.entityName}>`} searchBy${methodSuffix}(${parameters});`;
 		default:
-			return `${input.returnType ?? `Optional<${input.entityName}>`} findBy${methodSuffix}(${parameter});`;
+			return `${input.returnType ?? `Optional<${input.entityName}>`} findBy${methodSuffix}(${parameters});`;
 	}
 }
 

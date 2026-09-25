@@ -4,6 +4,23 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+
+- Added configurable severity filters for derived-query and JPQL diagnostics.
+- Added return-type choices when generating repository methods, including paginated signatures.
+- Added JPQL positional parameter validation, completion, and navigation.
+- Added DTO constructor projection validation and completion for `SELECT NEW`.
+
+### Fixed
+
+- Restricted entity properties to direct instance fields and excluded static fields, method locals, nested classes, comments, and false `@EntityGraph` matches.
+- Preserved UTF-16 source offsets after supplementary Unicode characters.
+- Refreshed open-document diagnostics after indexed entities change or are deleted.
+- Resolved same-named entities using explicit imports and indexed workspace files in parallel batches.
+- Validated JPQL collection element return types and recognized implicit ascending `OrderBy`.
+
 ## [0.8.0] - 2026-09-22
 
 ### Added

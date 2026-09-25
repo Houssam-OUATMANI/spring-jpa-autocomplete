@@ -90,6 +90,18 @@
           "type": "boolean",
           "default": true,
           "description": "Show entity information CodeLens entries above Spring Data repositories."
+        },
+        "springJpa.diagnostics.derivedQueries": {
+          "type": "string",
+          "enum": ["all", "errors", "warnings", "off"],
+          "default": "all",
+          "description": "Choose which derived-query diagnostics are shown."
+        },
+        "springJpa.diagnostics.jpql": {
+          "type": "string",
+          "enum": ["all", "errors", "warnings", "off"],
+          "default": "all",
+          "description": "Choose which JPQL diagnostics are shown."
         }
       }
     }

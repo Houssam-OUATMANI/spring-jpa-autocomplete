@@ -1,5 +1,5 @@
 import { EntityInfo } from '../entityModel';
-import { createEntityLookup, resolveEntityPropertyPath } from '../entityDiscovery';
+import { createEntityLookup, referencedEntityNames, resolveEntityPropertyPath } from '../entityDiscovery';
 import { decodeJavaString, maskJavaSource, parseJavaParameters, splitTopLevelParameters } from '../javaParsing';
 
 export interface JpqlQueryInfo {
@@ -9,12 +9,15 @@ export interface JpqlQueryInfo {
 	readonly queryEndOffset: number;
 	readonly sourceOffsets: readonly number[];
 	readonly repositoryPackage?: string;
+	readonly repositoryImports: readonly string[];
 	readonly isNative: boolean;
 	readonly selectedExpression?: string;
 	readonly selectedAlias?: string;
+	readonly dtoProjectionType?: string;
 	readonly functions: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly aliases: ReadonlyMap<string, string>; // alias -> EntityName
 	readonly namedParameters: readonly { name: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[];
+	readonly positionalParameters: readonly { index: number; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[];
 	readonly propertyAccesses: readonly { alias: string; property: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[];
 	readonly referencedEntities: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly methodSignature?: JpqlMethodSignature;
@@ -48,7 +51,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			continue;
 		}
 		const fullMatch = documentText.slice(match.index, methodEnd);
-		const signatureMatch = maskedText.slice(argsEnd + 1, methodEnd).match(/(?:@\w+(?:\([^)]*\))?\s*)*([\w$<>?[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/);
+		const signatureMatch = maskedText.slice(argsEnd + 1, methodEnd).match(/(?:@\w+(?:\([^)]*\))?\s*)*([\w$<>?.[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/);
 		if (!signatureMatch) {
 			queryAnnotationRegex.lastIndex = argsEnd + 1;
 			continue;
@@ -81,13 +84,16 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		};
 
 		// Parse JPQL structure
-		const aliases = resolveAliases(queryContent, knownEntities, documentText.match(/\bpackage\s+([\w.]+)\s*;/)?.[1]);
+		const aliases = resolveAliases(queryContent, knownEntities, documentText.match(/\bpackage\s+([\w.]+)\s*;/)?.[1], documentText);
+		const repositoryImports = [...documentText.matchAll(/\bimport\s+([\w.]+)\s*;/g)].map((importMatch) => importMatch[1]);
 		const selectionMatch = queryContent.match(/\bSELECT\s+(?:DISTINCT\s+)?([\s\S]*?)\s+FROM\b/i);
 		const selectedExpression = selectionMatch?.[1].trim();
 		const selectedAlias = selectedExpression && /^[A-Za-z_]\w*$/.test(selectedExpression) ? selectedExpression : undefined;
+		const dtoProjectionType = selectedExpression?.match(/^NEW\s+([\w$.]+)\s*\(/i)?.[1];
 		const sourceOffsetAt = (index: number) => sourceOffsets[Math.min(index, sourceOffsets.length - 1)];
 		const functions = extractFunctions(queryContent, sourceOffsetAt);
 		const namedParameters = extractNamedParameters(queryContent, sourceOffsetAt);
+		const positionalParameters = extractPositionalParameters(queryContent, sourceOffsetAt);
 		const propertyAccesses = extractPropertyAccesses(queryContent, sourceOffsetAt);
 		const referencedEntities = extractReferencedEntities(queryContent, sourceOffsetAt);
 
@@ -98,12 +104,15 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			queryEndOffset,
 			sourceOffsets,
 			repositoryPackage: documentText.match(/\bpackage\s+([\w.]+)\s*;/)?.[1],
+			repositoryImports,
 			isNative,
 			selectedExpression,
 			selectedAlias,
+			dtoProjectionType,
 			functions,
 			aliases,
 			namedParameters,
+			positionalParameters,
 			propertyAccesses,
 			referencedEntities,
 			methodSignature,
@@ -156,7 +165,7 @@ function findClosingParenthesis(text: string, openingOffset: number): number {
 
 function findMethodEnd(text: string, startOffset: number): number {
 	const methodText = text.slice(startOffset);
-	const methodMatch = methodText.match(/^(?:\s*@\w+(?:\([^)]*\))?\s*)*[\w$<>?[\]\s]+?\s+[A-Za-z_$]\w*\s*\(([\s\S]*?)\)\s*;/);
+	const methodMatch = methodText.match(/^(?:\s*@\w+(?:\([^)]*\))?\s*)*[\w$<>?.[\]\s]+?\s+[A-Za-z_$]\w*\s*\(([\s\S]*?)\)\s*;/);
 	return methodMatch ? startOffset + methodMatch[0].length : -1;
 }
 
@@ -181,7 +190,7 @@ function extractQuerySource(text: string, argsStart: number, argsEnd: number, an
 				break;
 			}
 			const content = text.slice(index + 3, end);
-			tokens.push({ content, offsets: [...content].map((_character, offset) => index + 3 + offset), start: index, end: end + 3 });
+			tokens.push({ content, offsets: Array.from({ length: content.length }, (_character, offset) => index + 3 + offset), start: index, end: end + 3 });
 			index = end + 3;
 			continue;
 		}
@@ -230,9 +239,9 @@ function extractQuerySource(text: string, argsStart: number, argsEnd: number, an
 	};
 }
 
-function resolveAliases(query: string, knownEntities: readonly EntityInfo[], preferredPackage?: string): Map<string, string> {
+function resolveAliases(query: string, knownEntities: readonly EntityInfo[], preferredPackage?: string, sourceText?: string): Map<string, string> {
 	const aliases = new Map<string, string>();
-	const entityMap = createEntityLookup(knownEntities, preferredPackage);
+	const entityMap = createEntityLookup(knownEntities, preferredPackage, sourceText);
 
 	// 1. FROM Entity [AS] alias
 	const fromMatches = query.matchAll(/\bFROM\s+([A-Z]\w*)(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi);
@@ -254,9 +263,9 @@ function resolveAliases(query: string, knownEntities: readonly EntityInfo[], pre
 				continue;
 			}
 			const property = resolveEntityPropertyPath(parentEntity, m[2], entityMap);
-			const targetEntity = property && [...entityMap.values()].find((entity) =>
-				property.type.split(/[<>,\s]/).some((type) => type.toLowerCase() === entity.name.toLowerCase()),
-			);
+			const targetName = property?.targetEntity ?? referencedEntityNames(property?.type ?? '')
+				.find((name) => entityMap.has(name.toLowerCase()));
+			const targetEntity = targetName ? entityMap.get(targetName.toLowerCase()) : undefined;
 			if (targetEntity && aliases.get(m[3]) !== targetEntity.name) {
 				aliases.set(m[3], targetEntity.name);
 				changed = true;
@@ -269,17 +278,37 @@ function resolveAliases(query: string, knownEntities: readonly EntityInfo[], pre
 
 function extractNamedParameters(query: string, sourceOffsetAt: (index: number) => number): { name: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[] {
 	const results: { name: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[] = [];
-	const regex = /:([A-Za-z_]\w*)/g;
-	let match: RegExpExecArray | null;
-	while ((match = regex.exec(query)) !== null) {
+	let quote: "'" | '"' | undefined;
+	for (let offset = 0; offset < query.length; offset++) {
+		if (quote) {
+			if (query[offset] === quote && query[offset + 1] === quote) {
+				offset++;
+			} else if (query[offset] === quote) {
+				quote = undefined;
+			}
+			continue;
+		}
+		if (query[offset] === "'" || query[offset] === '"') {
+			quote = query[offset] as "'" | '"';
+			continue;
+		}
+		if (query[offset] !== ':' || query[offset - 1] === ':') {
+			continue;
+		}
+		const match = query.slice(offset + 1).match(/^([A-Za-z_]\w*)/);
+		if (!match) {
+			continue;
+		}
 		const name = match[1];
+		const end = offset + name.length + 1;
 		results.push({
 			name,
-			startOffset: sourceOffsetAt(match.index),
-			endOffset: sourceOffsetAt(match.index + match[0].length - 1) + 1,
-			contentStart: match.index,
-			contentEnd: match.index + match[0].length,
+			startOffset: sourceOffsetAt(offset),
+			endOffset: sourceOffsetAt(end - 1) + 1,
+			contentStart: offset,
+			contentEnd: end,
 		});
+		offset = end - 1;
 	}
 	return results;
 }
@@ -299,6 +328,43 @@ function extractPropertyAccesses(query: string, sourceOffsetAt: (index: number) 
 			endOffset: sourceOffsetAt(propStart + property.length - 1) + 1,
 			contentStart: propStart,
 			contentEnd: propStart + property.length,
+		});
+	}
+	return results;
+}
+
+function extractPositionalParameters(query: string, sourceOffsetAt: (index: number) => number): { index: number; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[] {
+	const results: { index: number; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[] = [];
+	let automaticIndex = 0;
+	let quote: "'" | '"' | undefined;
+	for (let offset = 0; offset < query.length; offset++) {
+		if (quote) {
+			if (query[offset] === quote && query[offset + 1] === quote) {
+				offset++;
+			} else if (query[offset] === quote) {
+				quote = undefined;
+			}
+			continue;
+		}
+		if (query[offset] === "'" || query[offset] === '"') {
+			quote = query[offset] as "'" | '"';
+			continue;
+		}
+		if (query[offset] !== '?') {
+			continue;
+		}
+		const start = offset;
+		while (/\d/.test(query[offset + 1] ?? '')) {
+			offset++;
+		}
+		automaticIndex++;
+		const explicitIndex = query.slice(start + 1, offset + 1);
+		results.push({
+			index: explicitIndex ? Number(explicitIndex) : automaticIndex,
+			startOffset: sourceOffsetAt(start),
+			endOffset: sourceOffsetAt(offset) + 1,
+			contentStart: start,
+			contentEnd: offset + 1,
 		});
 	}
 	return results;

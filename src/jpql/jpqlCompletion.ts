@@ -35,6 +35,47 @@ export function createJpqlCompletions(
 	}
 
 	const items: vscode.CompletionItem[] = [];
+	const dtoMatch = linePrefix.match(/\bNEW\s+([\w$.]*)$/i);
+	if (dtoMatch) {
+		const typedType = dtoMatch[1];
+		const partial = typedType.split('.').pop() ?? '';
+		const startPos = new vscode.Position(position.line, position.character - typedType.length);
+		const replaceRange = new vscode.Range(startPos, position);
+		const dtoItems = entities
+			.filter((entity) => {
+				const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
+				return typedType.includes('.')
+					? qualifiedName.toLowerCase().startsWith(typedType.toLowerCase())
+					: entity.name.toLowerCase().startsWith(partial.toLowerCase());
+			})
+			.map((entity) => {
+				const item = new vscode.CompletionItem(entity.name, vscode.CompletionItemKind.Class);
+				const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
+				item.detail = `DTO projection: ${qualifiedName}`;
+				item.insertText = typedType.includes('.') ? qualifiedName : entity.name;
+				item.sortText = `0_${entity.name}`;
+				item.range = replaceRange;
+				return item;
+			});
+		if (dtoItems.length > 0) {
+			return dtoItems;
+		}
+	}
+	const positionalMatch = linePrefix.match(/\?(\d*)$/);
+	if (positionalMatch && activeQuery?.methodSignature) {
+		const partial = positionalMatch[1];
+		const placeholderStart = offset - partial.length - 1;
+		const previousIndexes = activeQuery.positionalParameters
+			.filter((parameter) => parameter.startOffset < placeholderStart)
+			.map((parameter) => parameter.index);
+		const nextIndex = Math.max(0, ...previousIndexes) + 1;
+		const startPos = new vscode.Position(position.line, position.character - partial.length - 1);
+		const item = new vscode.CompletionItem(`?${nextIndex}`, vscode.CompletionItemKind.Variable);
+		item.detail = `Method parameter ${nextIndex}`;
+		item.sortText = `0_${String(nextIndex).padStart(4, '0')}`;
+		item.range = new vscode.Range(startPos, position);
+		return [item];
+	}
 
 	// 1. Check for alias property completion: e.g. "u."
 	const aliasPropMatch = linePrefix.match(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
@@ -56,7 +97,8 @@ export function createJpqlCompletions(
 			}
 		}
 
-		const entityMap = createEntityLookup(entities, activeQuery?.repositoryPackage);
+		const repositoryImports = activeQuery?.repositoryImports.map((name) => `import ${name};`).join('\n');
+		const entityMap = createEntityLookup(entities, activeQuery?.repositoryPackage, repositoryImports);
 		let targetEntity = targetEntityName
 			? entityMap.get(targetEntityName.toLowerCase())
 			: entities[0]; // fallback to first entity if only 1
@@ -69,7 +111,7 @@ export function createJpqlCompletions(
 		}
 
 		if (targetEntity) {
-			const resolvedTarget = resolveEntityHierarchy(targetEntity, createEntityLookup(entities, activeQuery?.repositoryPackage));
+			const resolvedTarget = resolveEntityHierarchy(targetEntity, createEntityLookup(entities, activeQuery?.repositoryPackage, repositoryImports));
 			for (const prop of resolvedTarget.properties) {
 				if (!partial || prop.name.toLowerCase().startsWith(partial.toLowerCase())) {
 					const item = new vscode.CompletionItem(prop.name, vscode.CompletionItemKind.Field);

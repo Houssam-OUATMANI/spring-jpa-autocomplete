@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { maskJavaSource, parseJavaParameter, splitTopLevelParameters } from './javaParsing';
 
 export interface PropertyLocation {
 	readonly line: number;
@@ -31,7 +32,7 @@ export interface EntityInfo {
 	readonly location?: PropertyLocation;
 }
 
-const ENTITY_ANNOTATION = /@Entity(?:\s*\([^)]*\))?/;
+const ENTITY_ANNOTATION = /@Entity\b(?:\s*\([^)]*\))?/;
 const MAPPED_SUPERCLASS_ANNOTATION = /@MappedSuperclass\b/;
 const EMBEDDABLE_ANNOTATION = /@Embeddable\b/;
 const LOMBOK_DATA_OR_GETTER = /@(Data|Getter|Value)\b/;
@@ -40,23 +41,28 @@ const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 
 export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | undefined {
-	const isEntity = ENTITY_ANNOTATION.test(text);
-	const isMappedSuperclass = MAPPED_SUPERCLASS_ANNOTATION.test(text);
-	const isEmbeddable = EMBEDDABLE_ANNOTATION.test(text);
-	const recordMatch = text.match(RECORD_DECLARATION);
-	const packageName = text.match(PACKAGE_DECLARATION)?.[1];
-	const projectionMatch = text.match(/\binterface\s+([A-Z]\w*)\b[\s\S]*?\b(?:get|is|has)[A-Z]\w*\s*\(/);
+	const maskedText = maskJavaSource(text);
+	const isEntity = ENTITY_ANNOTATION.test(maskedText);
+	const isMappedSuperclass = MAPPED_SUPERCLASS_ANNOTATION.test(maskedText);
+	const isEmbeddable = EMBEDDABLE_ANNOTATION.test(maskedText);
+	const recordMatch = maskedText.match(RECORD_DECLARATION);
+	const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
+	const projectionMatch = maskedText.match(/\binterface\s+([A-Z]\w*)\b[\s\S]*?\b(?:get|is|has)[A-Z]\w*\s*\(/);
 
 	if (!isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch) {
 		return undefined;
 	}
 	if (projectionMatch && !isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch) {
+		const bodyStart = maskedText.indexOf('{', projectionMatch.index ?? 0);
+		const bodyEnd = bodyStart < 0 ? -1 : findMatchingBrace(maskedText, bodyStart);
 		return {
 			name: projectionMatch[1],
 			packageName,
 			uri,
 			isProjection: true,
-			properties: extractClassProperties(text, false),
+			properties: bodyStart >= 0 && bodyEnd >= 0
+				? extractClassProperties(text, maskedText, bodyStart, false, bodyEnd)
+				: [],
 		};
 	}
 	if (recordMatch) {
@@ -73,15 +79,28 @@ export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | un
 		};
 	}
 
-	const classMatch = text.match(CLASS_DECLARATION);
+	const entityAnnotationOffset = [
+		ENTITY_ANNOTATION.exec(maskedText)?.index,
+		MAPPED_SUPERCLASS_ANNOTATION.exec(maskedText)?.index,
+		EMBEDDABLE_ANNOTATION.exec(maskedText)?.index,
+	].filter((offset): offset is number => offset !== undefined).sort((left, right) => left - right)[0];
+	const classDeclarations = [...maskedText.matchAll(new RegExp(CLASS_DECLARATION.source, 'g'))];
+	const classMatch = entityAnnotationOffset === undefined
+		? classDeclarations[0]
+		: classDeclarations.find((match) => (match.index ?? -1) > entityAnnotationOffset);
 	if (!classMatch) {
+		return undefined;
+	}
+	const bodyStart = maskedText.indexOf('{', classMatch.index ?? 0);
+	const bodyEnd = bodyStart < 0 ? -1 : findMatchingBrace(maskedText, bodyStart);
+	if (bodyStart < 0 || bodyEnd < 0) {
 		return undefined;
 	}
 
 	const name = classMatch[1];
 	const superclassName = classMatch[2];
-	const hasLombok = LOMBOK_DATA_OR_GETTER.test(text);
-	const properties = extractClassProperties(text, hasLombok);
+	const hasLombok = LOMBOK_DATA_OR_GETTER.test(maskedText);
+	const properties = extractClassProperties(text, maskedText, bodyStart, hasLombok, bodyEnd);
 
 	return {
 		name,
@@ -95,94 +114,115 @@ export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | un
 }
 
 function extractRecordProperties(paramsText: string, fullText: string, recordOffset: number): EntityProperty[] {
-	const properties: EntityProperty[] = [];
-	const parts = paramsText.split(',');
-	let currentOffset = recordOffset + fullText.slice(recordOffset).indexOf(paramsText);
-
-	for (const part of parts) {
-		const trimmed = part.trim();
-		const match = trimmed.match(/([\w$.[\]<>?]+)\s+([a-zA-Z_$]\w*)$/);
-		if (match) {
-			const type = match[1];
-			const name = match[2];
-			const propOffset = fullText.indexOf(name, currentOffset);
-			const location = propOffset >= 0 ? calculateLocation(fullText, propOffset, name.length) : undefined;
-			properties.push({
-				name,
-				type,
-				location,
-			});
-		}
-		currentOffset += part.length + 1;
-	}
-	return properties;
+	const paramsOffset = recordOffset + fullText.indexOf(paramsText, recordOffset);
+	return splitTopLevelParameters(paramsText, paramsOffset)
+		.map((part) => {
+			const parameter = parseJavaParameter(part);
+			if (!parameter) {
+				return undefined;
+			}
+			return {
+				name: parameter.name,
+				type: parameter.type,
+				location: calculateLocation(fullText, parameter.nameOffset, parameter.name.length),
+			};
+		})
+		.filter((property): property is NonNullable<typeof property> => property !== undefined);
 }
 
-function extractClassProperties(text: string, hasLombok: boolean): EntityProperty[] {
+function extractClassProperties(text: string, maskedText: string, bodyStart: number, hasLombok: boolean, bodyEnd?: number): EntityProperty[] {
 	const properties = new Map<string, EntityProperty>();
+	const end = bodyEnd ?? findMatchingBrace(maskedText, bodyStart);
+	if (end < 0) {
+		return [];
+	}
+	const fieldRegex = /^\s*((?:@[\w.]+(?:\s*\([^)]*\))?\s*)*)(?:(?:public|protected|private|static|final|volatile|transient)\s+)*([\w$.[\]<>?]+(?:\s*<[\w$.[\],<>?\s]+>)?)\s+([a-zA-Z_$]\w*)\s*(?:=[\s\S]*?)?;\s*$/;
+	const getterRegex = /(?:^|\s)(?:public|protected|private)?\s*(?:static\s+)?([\w<>?,[\]\s.]+)\s+(?:get|is|has)([A-Z]\w*)\s*\(\s*\)\s*;?\s*$/;
+	let memberStart = bodyStart + 1;
+	let braceDepth = 0;
 
-	// Field regex: matches fields with optional annotations, modifiers, type, name
-	const fieldRegex = /(?:(@[\w.]+(?:\s*\([^)]*\))?\s*)*)(?:(?:public|protected|private|final|volatile|transient)\s+)*(?<![a-zA-Z_$])(?!(?:return|if|for|while|switch|throw|new)\b)([\w$.[\]<>?]+(?:\s*<[\w$.[\],<>?\s]+>)?)\s+([a-zA-Z_$]\w*)\s*(?:=[\s\S]*?)?;/g;
-	// Getter regex: matches getX() or isX()
-	const getterRegex = /\b(?:public|protected|private)?\s*(?:static\s+)?([\w<>?,[\]\s.]+)\s+(?:get|is|has)([A-Z]\w*)\s*\(\s*\)/g;
-
-	let match: RegExpExecArray | null;
-	while ((match = fieldRegex.exec(text)) !== null) {
-		const annotations = match[1] ?? '';
-		const fullMatch = match[0];
-		const type = match[2].trim();
-		const name = match[3];
-
-		// Check if transient
-		const isTransient = annotations.includes('@Transient') || fullMatch.includes('transient ');
-		if (isTransient) {
-			continue;
+	const addGetter = (member: string, memberOffset: number) => {
+		const getter = member.match(getterRegex);
+		if (!getter) {
+			return;
 		}
+		const rawName = getter[2];
+		const propName = rawName[0].toLowerCase() + rawName.slice(1);
+		if (!properties.has(propName)) {
+			const nameOffset = memberOffset + member.lastIndexOf(`get${rawName}`);
+			properties.set(propName, {
+				name: propName,
+				type: getter[1].trim(),
+				location: calculateLocation(text, nameOffset, rawName.length + 3),
+			});
+		}
+	};
 
-		// Check if id
-		const isId = annotations.includes('@Id');
-		const relation = extractRelation(annotations);
+	const addField = (member: string, memberOffset: number) => {
+		const maskedMember = maskedText.slice(memberOffset, memberOffset + member.length);
+		if (getterRegex.test(maskedMember)) {
+			addGetter(member, memberOffset);
+			return;
+		}
+		const field = maskedMember.match(fieldRegex);
+		if (!field) {
+			addGetter(member, memberOffset);
+			return;
+		}
+		const annotations = field[1] ?? '';
+		const modifiers = maskedMember.match(/^\s*(?:(?:@[\w.]+(?:\s*\([^)]*\))?\s*)*)(?:(?:public|protected|private|static|final|volatile|transient)\s+)*/)?.[0] ?? '';
+		if (annotations.includes('@Transient') || modifiers.includes('transient ') || modifiers.includes('static ')) {
+			return;
+		}
+		const type = field[2].trim();
+		const name = field[3];
+		const nameOffset = memberOffset + maskedMember.lastIndexOf(name);
 		const targetEntity = annotations.match(/targetEntity\s*=\s*([A-Z]\w*)\.class/)?.[1];
-		const isCollection = /\b(?:Collection|List|Set|Iterable|Map)<|\[\]/.test(type);
-
-		const isStatic = fullMatch.includes('static ');
-		if (isStatic) {
-			continue;
-		}
-
-		const propOffset = match.index + fullMatch.lastIndexOf(name);
-		const location = calculateLocation(text, propOffset, name.length);
-
 		properties.set(name, {
 			name,
 			type,
-			isId,
+			isId: annotations.includes('@Id'),
 			isTransient: false,
-			relation,
+			relation: extractRelation(annotations),
 			targetEntity,
-			isCollection,
-			location,
+			isCollection: /\b(?:Collection|List|Set|Iterable|Map)<|\[\]/.test(type),
+			location: calculateLocation(text, nameOffset, name.length),
 		});
-	}
+	};
 
-	// Also inspect getters for properties
-	while ((match = getterRegex.exec(text)) !== null) {
-		const type = match[1].trim();
-		const rawName = match[2];
-		const propName = rawName[0].toLowerCase() + rawName.slice(1);
-		const existing = properties.get(propName);
-		if (!existing) {
-			const propOffset = match.index;
-			const location = calculateLocation(text, propOffset, match[0].length);
-			properties.set(propName, {
-				name: propName,
-				type,
-				location,
-			});
+	for (let offset = bodyStart + 1; offset < end; offset++) {
+		if (maskedText[offset] === '{') {
+			if (braceDepth === 0) {
+				const header = maskedText.slice(memberStart, offset);
+				if (!header.includes('=')) {
+					addGetter(text.slice(memberStart, offset), memberStart);
+				}
+			}
+			braceDepth++;
+		} else if (maskedText[offset] === '}') {
+			braceDepth--;
+			if (braceDepth === 0 && !maskedText.slice(memberStart, offset).includes('=')) {
+				memberStart = offset + 1;
+			}
+		} else if (maskedText[offset] === ';' && braceDepth === 0) {
+			addField(text.slice(memberStart, offset + 1), memberStart);
+			memberStart = offset + 1;
 		}
 	}
 
 	return [...properties.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function findMatchingBrace(maskedText: string, openingOffset: number): number {
+	let depth = 0;
+	for (let offset = openingOffset; offset < maskedText.length; offset++) {
+		if (maskedText[offset] === '{') {
+			depth++;
+		} else if (maskedText[offset] === '}' && --depth === 0) {
+			return offset;
+		}
+	}
+	return -1;
 }
 
 function extractRelation(annotations: string): JpaRelation | undefined {
