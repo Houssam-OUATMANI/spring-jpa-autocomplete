@@ -2,6 +2,12 @@
 
 VS Code assistance for Spring Data JPA repositories: derived-query completion, JPQL completion, diagnostics, quick-fixes, and navigation for Java projects.
 
+## Marketplace
+
+Marketplace link
+<a href="https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete" target="_blank">Spring Data JPA Tools
+</a>
+
 ## Installation
 
 Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java or Spring project. The extension activates automatically for Java files.
