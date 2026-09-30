@@ -17,7 +17,9 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
 - **Derived query completions**: `findBy`, `countBy`, `existsBy`, `deleteBy`, etc. with modifiers (`Distinct`, `Top`, `First`), predicates, operators, connectors, and `OrderBy`.
 - **Completion ordering**: entity properties are displayed before operators and keywords.
 - **Entity & Property model**:
+  - Grammar-based Java syntax-tree parsing for entity declarations, fields, annotations, records, and projections, with the existing parser retained as a fallback for incomplete source while typing.
   - Support for `@Entity`, `@MappedSuperclass` inheritance, `@Embeddable`, and Java records.
+  - JPA entity names (`@Entity(name = ...)`), physical table names (`@Table`), and physical column names (`@Column` / `@JoinColumn`).
   - Support for Spring Data projection interfaces based on `getX()`, `isX()`, and `hasX()` accessors.
   - Automatic property detection for Lombok `@Data`, `@Getter`, `@Value`.
   - Exclusion of `@Transient` fields and `transient` keyword.
@@ -49,6 +51,7 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Syntax highlighting inside `@Query` strings and text blocks for clauses, entities, aliases, properties, parameters, operators, functions, literals, and numbers.
   - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LEFT JOIN`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
   - Hover documentation recognizes compound join keywords such as `LEFT JOIN`, `LEFT OUTER JOIN`, and `INNER JOIN` as a single JPQL construct.
+- **Native SQL completion**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with table and mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.
 - **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
   - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
   - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
@@ -111,7 +114,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.8.0` release includes the parser, entity-resolution, native-query, and repository-context fixes listed in the changelog above.
+The extension version is maintained in `package.json`. The `0.9.0` release includes the parser, entity-resolution, native-query, and repository-context fixes listed in the changelog above.
 
 ## Requirements
 

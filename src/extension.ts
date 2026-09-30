@@ -421,6 +421,11 @@ export function activate(context: vscode.ExtensionContext) {
 	}));
 	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
 		if (event.affectsConfiguration('springJpa')) {
+			if (event.affectsConfiguration('springJpa.includeTestSources')) {
+				entityIndex.clear();
+				void entityIndex.ensureInitialized().then(scheduleWorkspaceJavaDiagnostics);
+				return;
+			}
 			scheduleWorkspaceJavaDiagnostics();
 		}
 	}));

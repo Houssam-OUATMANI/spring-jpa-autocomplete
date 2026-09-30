@@ -4,6 +4,24 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Added
+
+- Added grammar-based Java syntax-tree parsing for entity models, while retaining the previous parser as a fallback for incomplete source during editing.
+- Added mapped table and column completion for native queries using `@NativeQuery` and `@Query(nativeQuery = true)`.
+- Added extraction of explicit JPA entity, table, and column names, including JPQL validation against `@Entity(name = ...)`.
+
+### Improved
+
+- Reused unchanged Java source fingerprints to avoid reparsing entities and rebuilding the name index on every completion request.
+
+### Fixed
+
+- Rebuilt the entity index when `springJpa.includeTestSources` changes.
+- Resolved repository CodeLens entities by package and imports when simple class names collide.
+- Updated the README release reference to `0.9.0`.
+
 ## [0.9.0] - 2026-09-25
 
 ### Added

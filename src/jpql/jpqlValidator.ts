@@ -225,7 +225,8 @@ function validateReturnType(
 	}
 
 	const returnType = normalizeJavaType(queryInfo.methodSignature.returnType);
-	const expectedType = normalizeJavaType(selectedType).split('.').pop();
+	const selectedEntity = queryInfo.dtoProjectionType ? undefined : entityMap.get(selectedType.toLowerCase());
+	const expectedType = normalizeJavaType(selectedEntity?.name ?? selectedType).split('.').pop();
 	const containerType = returnType.match(/^(?:List|Set|Collection|Iterable|Stream|Page|Slice|Optional)<(.+)>$/)?.[1];
 	const actualType = normalizeJavaType(containerType ?? returnType).split('.').pop();
 	if (actualType === expectedType) {

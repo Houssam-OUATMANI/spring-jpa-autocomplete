@@ -35,7 +35,7 @@ export interface JpqlMethodSignature {
 export function extractAllJpqlQueries(documentText: string, knownEntities: readonly EntityInfo[]): JpqlQueryInfo[] {
 	const queries: JpqlQueryInfo[] = [];
 	const maskedText = maskJavaSource(documentText);
-	const queryAnnotationRegex = /@Query\s*\(/g;
+	const queryAnnotationRegex = /@(Query|NativeQuery)\s*\(/g;
 
 	let match: RegExpExecArray | null;
 	while ((match = queryAnnotationRegex.exec(maskedText)) !== null) {
@@ -61,7 +61,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		const paramsStart = argsEnd + 1 + (signatureMatch.index ?? 0) + signatureMatch[0].indexOf(signatureMatch[3]);
 		const paramsText = documentText.slice(paramsStart, paramsStart + signatureMatch[3].length);
 
-		const isNative = /\bnativeQuery\s*=\s*true\b/.test(annotationArgs);
+		const isNative = match[1] === 'NativeQuery' || /\bnativeQuery\s*=\s*true\b/.test(annotationArgs);
 
 		const querySource = extractQuerySource(documentText, argsStart, argsEnd, annotationArgs);
 

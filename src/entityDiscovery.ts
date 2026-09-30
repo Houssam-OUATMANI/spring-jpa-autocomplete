@@ -6,10 +6,19 @@ export { EntityInfo, EntityProperty, PropertyLocation };
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 
+function sourceFingerprint(text: string): string {
+	let hash = 2166136261;
+	for (let index = 0; index < text.length; index++) {
+		hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+	}
+	return `${text.length}:${hash >>> 0}`;
+}
+
 export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
 	private entitiesByUri = new Map<string, EntityInfo>();
 	private entitiesByName = new Map<string, EntityInfo[]>();
+	private sourceFingerprints = new Map<string, string>();
 	private isInitialized = false;
 	private initPromise: Promise<void> | undefined;
 
@@ -33,6 +42,7 @@ export class WorkspaceEntityIndex {
 	public clear(): void {
 		this.entitiesByUri.clear();
 		this.entitiesByName.clear();
+		this.sourceFingerprints.clear();
 		this.isInitialized = false;
 		this.initPromise = undefined;
 	}
@@ -41,19 +51,30 @@ export class WorkspaceEntityIndex {
 		if (document.languageId !== 'java') {
 			return undefined;
 		}
-		const entity = parseEntityModel(document.getText(), document.uri);
 		const uriKey = document.uri.toString();
-		this.entitiesByUri.delete(uriKey);
+		const text = document.getText();
+		const fingerprint = sourceFingerprint(text);
+		if (this.sourceFingerprints.get(uriKey) === fingerprint) {
+			return this.entitiesByUri.get(uriKey);
+		}
+		const previousEntity = this.entitiesByUri.get(uriKey);
+		const entity = parseEntityModel(text, document.uri);
+		this.sourceFingerprints.set(uriKey, fingerprint);
 		if (entity) {
 			this.entitiesByUri.set(uriKey, entity);
+		} else {
+			this.entitiesByUri.delete(uriKey);
 		}
-		this.rebuildNameIndex();
+		if (previousEntity || entity) {
+			this.rebuildNameIndex();
+		}
 		return entity;
 	}
 
 	public removeUri(uri: vscode.Uri): void {
 		const uriKey = uri.toString();
 		this.entitiesByUri.delete(uriKey);
+		this.sourceFingerprints.delete(uriKey);
 		this.rebuildNameIndex();
 	}
 
@@ -83,14 +104,20 @@ export class WorkspaceEntityIndex {
 				const batch = await Promise.all(files.slice(offset, offset + 32).map(async (uri) => {
 					try {
 						const document = await vscode.workspace.openTextDocument(uri);
-						return parseEntityModel(document.getText(), document.uri);
+						const text = document.getText();
+						return { uri: document.uri, fingerprint: sourceFingerprint(text), entity: parseEntityModel(text, document.uri) };
 					} catch {
 						return undefined;
 					}
 				}));
-				for (const entity of batch) {
-					if (entity) {
-						this.entitiesByUri.set(entity.uri.toString(), entity);
+				for (const result of batch) {
+					if (!result) {
+						continue;
+					}
+					const uriKey = result.uri.toString();
+					this.sourceFingerprints.set(uriKey, result.fingerprint);
+					if (result.entity) {
+						this.entitiesByUri.set(uriKey, result.entity);
 					}
 				}
 			}
@@ -141,17 +168,19 @@ export function createEntityLookup(
 		imports.set(qualifiedName.split('.').pop()!.toLowerCase(), qualifiedName);
 	}
 	for (const entity of entities) {
-		const key = entity.name.toLowerCase();
 		const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
 		lookup.set(qualifiedName.toLowerCase(), entity);
-		const priority = imports.get(key)?.toLowerCase() === qualifiedName.toLowerCase()
+		const priority = imports.get(entity.name.toLowerCase())?.toLowerCase() === qualifiedName.toLowerCase()
 			? 3
 			: preferredPackage && entity.packageName === preferredPackage
 				? 2
 				: 1;
-		if ((priorities.get(key) ?? 0) < priority) {
-			lookup.set(key, entity);
-			priorities.set(key, priority);
+		for (const name of new Set([entity.name, entity.entityName].filter((candidate): candidate is string => Boolean(candidate)))) {
+			const key = name.toLowerCase();
+			if ((priorities.get(key) ?? 0) < priority) {
+				lookup.set(key, entity);
+				priorities.set(key, priority);
+			}
 		}
 	}
 	return lookup;

@@ -3,6 +3,7 @@ import { EntityInfo } from '../entityModel';
 import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy, resolveEntityPropertyPath } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
 import { JPQL_KEYWORDS } from './jpqlLanguage';
+import { createNativeSqlCompletions } from './nativeSqlCompletion';
 
 export function createJpqlCompletions(
 	document: vscode.TextDocument,
@@ -20,6 +21,9 @@ export function createJpqlCompletions(
 	const activeQuery = queries.find(
 		(q) => offset >= q.queryStartOffset && offset <= q.queryEndOffset,
 	);
+	if (activeQuery?.isNative) {
+		return createNativeSqlCompletions(document, position, entities, queries);
+	}
 
 	if (!activeQuery) {
 		// Fallback check for single line query being typed
@@ -30,10 +34,6 @@ export function createJpqlCompletions(
 			return undefined;
 		}
 	}
-	if (activeQuery?.isNative) {
-		return undefined;
-	}
-
 	const items: vscode.CompletionItem[] = [];
 	const dtoMatch = linePrefix.match(/\bNEW\s+([\w$.]*)$/i);
 	if (dtoMatch) {

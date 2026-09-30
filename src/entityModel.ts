@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { maskJavaSource, parseJavaParameter, splitTopLevelParameters } from './javaParsing';
+import { parseEntityModelAst } from './javaAstParser';
 
 export interface PropertyLocation {
 	readonly line: number;
@@ -14,6 +15,7 @@ export interface EntityProperty {
 	readonly isTransient?: boolean;
 	readonly relation?: JpaRelation;
 	readonly targetEntity?: string;
+	readonly columnName?: string;
 	readonly isCollection?: boolean;
 	readonly location?: PropertyLocation;
 }
@@ -22,6 +24,8 @@ export type JpaRelation = 'OneToOne' | 'OneToMany' | 'ManyToOne' | 'ManyToMany' 
 
 export interface EntityInfo {
 	readonly name: string;
+	readonly entityName?: string;
+	readonly tableName?: string;
 	readonly packageName?: string;
 	readonly uri: vscode.Uri;
 	readonly isProjection?: boolean;
@@ -41,6 +45,18 @@ const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 
 export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | undefined {
+	try {
+		const astEntity = parseEntityModelAst(text, uri);
+		if (astEntity) {
+			return astEntity;
+		}
+	} catch {
+		return parseEntityModelLegacy(text, uri);
+	}
+	return parseEntityModelLegacy(text, uri);
+}
+
+function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | undefined {
 	const maskedText = maskJavaSource(text);
 	const isEntity = ENTITY_ANNOTATION.test(maskedText);
 	const isMappedSuperclass = MAPPED_SUPERCLASS_ANNOTATION.test(maskedText);

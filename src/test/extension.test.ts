@@ -1,7 +1,8 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel } from '../entityModel';
+import { parseEntityModelAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
 import { createKeywordItem, extractMethodParameterNames, shouldDisplayDiagnostic } from '../extension';
@@ -163,6 +164,38 @@ suite('Extension Test Suite', () => {
 		]);
 	});
 
+	test('extracts JPA metadata and fields directly from the Java AST', () => {
+		const entity = parseEntityModelAst(`
+			package com.example;
+			@Entity(name = "Account")
+			@Table(name = "account_records")
+			class User extends BaseEntity {
+				@Id private Long id;
+				@ManyToOne(targetEntity = com.example.Team.class) @JoinColumn(name = "team_id") private Team team;
+				private Map<String, List<Long>> tags;
+				private String first, second;
+				@Transient private String cached;
+				private static String cache;
+				public String getDisplayName() { return "a; } b"; }
+			}
+		`, vscode.Uri.parse('file:///User.java'))!;
+		assert.strictEqual(entity.name, 'User');
+		assert.strictEqual(entity.entityName, 'Account');
+		assert.strictEqual(entity.tableName, 'account_records');
+		assert.strictEqual(entity.packageName, 'com.example');
+		assert.strictEqual(entity.superclassName, 'BaseEntity');
+		assert.deepStrictEqual(entity.properties.map((property) => property.name), ['displayName', 'first', 'id', 'second', 'tags', 'team']);
+		assert.strictEqual(entity.properties.find((property) => property.name === 'team')?.relation, 'ManyToOne');
+		assert.strictEqual(entity.properties.find((property) => property.name === 'team')?.targetEntity, 'com.example.Team');
+		assert.strictEqual(entity.properties.find((property) => property.name === 'team')?.columnName, 'team_id');
+		assert.strictEqual(entity.properties.find((property) => property.name === 'tags')?.type, 'Map<String, List<Long>>');
+	});
+
+	test('falls back to the base parser for incomplete Java source', () => {
+		const entity = parseEntityModel('@Entity class User { String email; ??? }', vscode.Uri.parse('file:///User.java'));
+		assert.deepStrictEqual(entity?.properties.map((property) => property.name), ['email']);
+	});
+
 	test('inherits properties from @MappedSuperclass', () => {
 		const baseEntity = parseEntityModel(`
 			@MappedSuperclass
@@ -210,6 +243,22 @@ suite('Extension Test Suite', () => {
 		const second = parseEntityModel('package com.second; @Entity class User { String second; }', vscode.Uri.parse('file:///second/User.java'))!;
 		const repository = 'package com.repository; import com.second.User; interface UserRepository extends JpaRepository<User, Long> {}';
 		assert.deepStrictEqual(findEntityProperties(repository, [first, second]).map((property) => property.name), ['second']);
+	});
+
+	test('resolves an entity for CodeLens by repository package and imports', () => {
+		const first = parseEntityModel('package com.first; @Entity class User { String first; }', vscode.Uri.parse('file:///first/User.java'))!;
+		const second = parseEntityModel('package com.second; @Entity class User { String second; }', vscode.Uri.parse('file:///second/User.java'))!;
+		const entities = createEntityLookup([first, second], 'com.repository', 'package com.repository; import com.second.User;');
+		assert.strictEqual(entities.get('user'), second);
+	});
+
+	test('resolves a JPQL entity name declared with @Entity(name = ...)', () => {
+		const entity = parseEntityModel('@Entity(name = "Account") class User { Long id; }', vscode.Uri.parse('file:///User.java'))!;
+		const entities = createEntityLookup([entity]);
+		assert.strictEqual(entities.get('account'), entity);
+		const queries = extractAllJpqlQueries('@Query("SELECT a FROM Account a") List<User> findAccounts();', [entity]);
+		assert.strictEqual(queries[0]?.aliases.get('a'), 'Account');
+		assert.deepStrictEqual(validateJpql(queries[0], [entity]), []);
 	});
 
 	test('recognizes projection interfaces and suggests close property names', () => {
@@ -677,6 +726,19 @@ suite('Extension Test Suite', () => {
 		index.clear();
 	});
 
+	test('reuses an indexed entity when its Java source is unchanged', () => {
+		const index = new WorkspaceEntityIndex();
+		const document = {
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///cached/User.java'),
+			getText: () => 'package cached; @Entity class User { String email; }',
+		} as any;
+		const first = index.updateDocument(document);
+		const second = index.updateDocument(document);
+		assert.ok(first);
+		assert.strictEqual(second, first);
+	});
+
 	test('selects the repository entity nearest to the method in a multi-repository file', () => {
 		const text = 'interface UserRepository extends JpaRepository<User, Long> { }\n'
 			+ 'interface OrderRepository extends JpaRepository<Order, Long> { }';
@@ -686,7 +748,7 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(findEntityProperties(text, [user, order], 'Order').map((property) => property.name), ['number']);
 	});
 
-	test('does not offer JPQL completion inside native queries', () => {
+	test('does not fall back to JPQL completion inside native queries', () => {
 		const text = '@Query(value = "SELECT * FROM users", nativeQuery = true) List<User> findAll();';
 		const document = {
 			getText: () => text,
@@ -694,7 +756,34 @@ suite('Extension Test Suite', () => {
 			offsetAt: (position: vscode.Position) => position.character,
 		} as any;
 		const completions = createJpqlCompletions(document, new vscode.Position(0, text.indexOf('users') + 5), [{ name: 'User', properties: [], uri: vscode.Uri.parse('file:///User.java') }]);
-		assert.strictEqual(completions, undefined);
+		assert.deepStrictEqual(completions, []);
+	});
+
+	test('completes mapped SQL columns inside @NativeQuery', () => {
+		const entity = parseEntityModel('@Entity @Table(name = "account_records") class Account { @Column(name = "account_id") Long id; @Column(name = "login_name") String login; }', vscode.Uri.parse('file:///Account.java'))!;
+		const text = '@NativeQuery(value = "SELECT a. FROM account_records a") List<Account> findAll();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const position = new vscode.Position(0, text.indexOf('a. FROM') + 2);
+		const completions = createJpqlCompletions(document, position, [entity]);
+		assert.ok(completions?.some((item) => item.label === 'account_id'));
+		assert.ok(completions?.some((item) => item.label === 'login_name'));
+	});
+
+	test('completes mapped tables in @Query native SQL', () => {
+		const entity = parseEntityModel('@Entity @Table(name = "account_records") class Account { Long id; }', vscode.Uri.parse('file:///Account.java'))!;
+		const text = '@Query(value = "SELECT * FROM account", nativeQuery = true) List<Account> findAll();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const position = new vscode.Position(0, text.indexOf('account"') + 'account'.length);
+		const completions = createJpqlCompletions(document, position, [entity]);
+		assert.ok(completions?.some((item) => item.label === 'account_records'));
 	});
 
 	test('prioritizes derived property suggestions over operators', () => {

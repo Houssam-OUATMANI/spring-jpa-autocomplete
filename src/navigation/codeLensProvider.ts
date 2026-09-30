@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, WorkspaceEntityIndex } from '../entityDiscovery';
 
 export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 	public async provideCodeLenses(document: vscode.TextDocument, _token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
@@ -15,7 +15,10 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 		}
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const entity = index.getAllEntities().find((candidate) => candidate.name === repositoryMatch[1]);
+		const repositoryText = document.getText();
+		const repositoryPackage = repositoryText.match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
+		const entities = createEntityLookup(index.getAllEntities(), repositoryPackage, repositoryText);
+		const entity = entities.get(repositoryMatch[1].toLowerCase());
 		if (!entity) {
 			return [];
 		}
