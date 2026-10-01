@@ -6,22 +6,28 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-10-02
+
 ### Added
 
 - Added generic SQL syntax highlighting for `@NativeQuery` and `@Query(nativeQuery = true)`.
-- Added grammar-based Java syntax-tree parsing for entity models, while retaining the previous parser as a fallback for incomplete source during editing.
 - Added mapped table and column completion for native queries using `@NativeQuery` and `@Query(nativeQuery = true)`.
+- Added grammar-based Java syntax-tree parsing for entity models, while retaining the previous parser as a fallback for incomplete source during editing.
 - Added extraction of explicit JPA entity, table, and column names, including JPQL validation against `@Entity(name = ...)`.
+- Added Quick Fix support for adding all missing derived-query parameters in one action.
 
 ### Improved
 
 - Reused unchanged Java source fingerprints to avoid reparsing entities and rebuilding the name index on every completion request.
+- Restricted repository method completions to repository bodies and made typed prefixes replace cleanly.
+- Kept native SQL highlighting separate from JPQL highlighting.
 
 ### Fixed
 
 - Rebuilt the entity index when `springJpa.includeTestSources` changes.
 - Resolved repository CodeLens entities by package and imports when simple class names collide.
-- Updated the README release reference to `0.9.0`.
+- Recognized repository methods that declare checked exceptions.
+- Fixed native query recognition across supported annotation forms.
 
 ## [0.9.0] - 2026-09-25
 

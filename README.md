@@ -1,18 +1,64 @@
 # Spring Data JPA Tools
 
-VS Code assistance for Spring Data JPA repositories: derived-query completion, JPQL completion, diagnostics, quick-fixes, and navigation for Java projects.
+**Version 0.9.9** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 
-## Marketplace
+Write Spring Data JPA repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and entity models.
 
-Marketplace link
-<a href="https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete" target="_blank">Spring Data JPA Tools
-</a>
+## See It in Action
 
-## Installation
+### Build derived queries from entity properties
 
-Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java or Spring project. The extension activates automatically for Java files.
+```java
+@Entity
+class User {
+  String email;
+  boolean active;
+  Instant createdAt;
+}
 
-## Features
+interface UserRepository extends JpaRepository<User, Long> {
+  List<User> findByEmailAndActiveOrderByCreatedAtDesc(String email, boolean active);
+}
+```
+
+Complete after `findBy` to browse entity properties, then continue with operators, `And` / `Or`, or `OrderBy`. The extension checks property names, argument count and types, return types, and pagination parameters as you edit.
+
+### Catch JPQL mistakes before running the application
+
+```java
+@Query("""
+  SELECT o
+  FROM Order o
+  JOIN o.customer c
+  WHERE c.emial = :email
+""")
+List<Order> findByCustomerEmail(@Param("email") String email);
+```
+
+The unknown `emial` property gets a diagnostic and, when a close match exists, a rename fix. Complete after `c.` to see `Customer` properties; use `F12` on a property or parameter to navigate to its declaration.
+
+### Fix every missing argument in one action
+
+```java
+Boolean existsByCreatedAtOrTitleOrContent();
+```
+
+The Quick Fix infers the three property types and adds all required parameters together, instead of making you apply the same fix repeatedly.
+
+### Work with native SQL too
+
+```java
+@Query(value = """
+  SELECT u.user_id, u.email
+  FROM app_user u
+  WHERE u.email = :email
+""", nativeQuery = true)
+List<User> searchByEmail(@Param("email") String email);
+```
+
+Native query strings receive SQL syntax highlighting and mapped table / column suggestions from `@Table`, `@Column`, and `@JoinColumn`. `@NativeQuery` is supported as well. Highlighting is currently generic SQL; dialect-specific validation is not enabled.
+
+## Feature Reference
 
 - **Derived query completions**: `findBy`, `countBy`, `existsBy`, `deleteBy`, etc. with modifiers (`Distinct`, `Top`, `First`), predicates, operators, connectors, and `OrderBy`.
 - **Completion ordering**: entity properties are displayed before operators and keywords.
@@ -57,8 +103,7 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
   - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
   - Click on repository generic entity `JpaRepository<User, Long>` $\to$ opens `User.java`.
 - **Quick-Fixes (`Alt+Enter` / Lightbulb)**:
-  - Add missing parameter to repository method signature.
-  - Add the first missing parameter when several derived-query predicates are present.
+  - Add every missing derived-query parameter in one action.
   - Fix incompatible return type (`boolean`, `long`).
   - Rename unknown properties to the closest known entity property when a suggestion is available.
   - Add `@Param` annotation and its import to method parameters.
@@ -79,29 +124,9 @@ Install **Spring Data JPA Tools** from the VS Code Marketplace, then open a Java
 - **Debounced diagnostics**: Java diagnostics are delayed briefly while typing to avoid repeated analysis.
 - **Repository context**: diagnostics and derived-query completion use the repository entity nearest to the current method, including files containing multiple repositories.
 
-## Usage
+## Get Started
 
-Open a Java repository and type a method such as:
-
-```java
-Optional<User> findByEmailAndActiveOrderByCreatedAtDesc(String email, boolean active);
-```
-
-Multi-line JPQL Text Blocks with aliases and named parameters are also validated:
-
-```java
-@Query("""
-    SELECT o
-    FROM Order o
-    JOIN o.user u
-    WHERE u.email = :userEmail
-""")
-List<Order> findByUserEmail(@Param("userEmail") String userEmail);
-```
-
-Press `Ctrl+Click` on any property to navigate directly to its definition in the entity, or `Alt+Enter` on warnings/errors to apply Quick-Fixes.
-
-To generate a repository method, place the cursor on an entity property in a repository file and run `Spring JPA: Generate Repository Method` from the Command Palette. Choose the method kind and query operator.
+Install the extension, open a Java project, and start editing a Spring Data repository. Completion and diagnostics activate automatically. Use `F12` to navigate to a property, `Alt+Enter` to apply a Quick Fix, or run `Spring JPA: Generate Repository Method` from the Command Palette with the cursor on an entity property.
 
 ## Development
 
@@ -114,7 +139,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The extension version is maintained in `package.json`. The `0.9.0` release includes the parser, entity-resolution, native-query, and repository-context fixes listed in the changelog above.
+The current version is `0.9.9`; release notes are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
