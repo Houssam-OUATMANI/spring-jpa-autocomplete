@@ -3,22 +3,47 @@
   "injectionSelector": "L:source.java",
   "patterns": [
     {
+      "name": "meta.embedded.sql",
+      "begin": "(@NativeQuery\\s*\\(\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
+      "patterns": [{ "include": "#sql" }]
+    },
+    {
+      "name": "meta.embedded.sql",
+      "begin": "(@Query\\s*\\(\\s*nativeQuery\\s*=\\s*true\\s*,\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
+      "patterns": [{ "include": "#sql" }]
+    },
+    {
+      "name": "meta.embedded.sql",
+      "begin": "(@Query\\s*\\(\\s*(?=(?:(?:\"\"\"[\\s\\S]*?\"\"\"|\"(?:\\\\.|[^\"\\\\])*\"|'(?:\\\\.|[^'\\\\])*')|[^)])*\\bnativeQuery\\s*=\\s*true\\b)(?:value\\s*=\\s*)?)(\"\"\"|\")",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
+      "patterns": [{ "include": "#sql" }]
+    },
+    {
       "name": "meta.embedded.jpql",
       "begin": "(@Query\\s*\\(\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")",
       "beginCaptures": {
-        "1": {
-          "name": "entity.name.function.annotation.java"
-        },
-        "2": {
-          "name": "punctuation.definition.string.begin.java"
-        }
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
       },
       "end": "(\"\"\"|(?<!\\\\)\")",
-      "endCaptures": {
-        "1": {
-          "name": "punctuation.definition.string.end.java"
-        }
-      },
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
       "patterns": [
         {
           "name": "keyword.control.jpql",
@@ -35,43 +60,72 @@
         {
           "match": "\\b(FROM|JOIN)\\s+([A-Z][A-Za-z0-9_$]*)",
           "captures": {
-            "1": {
-              "name": "keyword.control.jpql"
-            },
-            "2": {
-              "name": "entity.name.type.jpql"
-            }
+            "1": { "name": "keyword.control.jpql" },
+            "2": { "name": "entity.name.type.jpql" }
           }
         },
         {
           "match": "\\b(?:FROM|JOIN)\\s+[A-Z][A-Za-z0-9_$]*(?:\\s+AS)?\\s+([A-Za-z_$][A-Za-z0-9_$]*)",
-          "captures": {
-            "1": {
-              "name": "variable.other.alias.jpql"
-            }
-          }
+          "captures": { "1": { "name": "variable.other.alias.jpql" } }
         },
-        {
-          "name": "variable.parameter.jpql",
-          "match": ":[A-Za-z_$][A-Za-z0-9_$]*"
-        },
-        {
-          "name": "constant.language.jpql",
-          "match": "\\b(?:TRUE|FALSE)\\b"
-        },
-        {
-          "name": "string.quoted.jpql",
-          "match": "'(?:[^'\\\\]|\\\\.)*'"
-        },
-        {
-          "name": "constant.numeric.jpql",
-          "match": "\\b\\d+(?:\\.\\d+)?\\b"
-        },
+        { "name": "variable.parameter.jpql", "match": ":[A-Za-z_$][A-Za-z0-9_$]*" },
+        { "name": "constant.language.jpql", "match": "\\b(?:TRUE|FALSE)\\b" },
+        { "name": "string.quoted.jpql", "match": "'(?:[^'\\\\]|\\\\.)*'" },
+        { "name": "constant.numeric.jpql", "match": "\\b\\d+(?:\\.\\d+)?\\b" },
         {
           "name": "variable.other.property.jpql",
           "match": "\\b[A-Za-z_$][A-Za-z0-9_$]*\\.([A-Za-z_$][A-Za-z0-9_$]*)\\b"
         }
       ]
     }
-  ]
+  ],
+  "repository": {
+    "sql": {
+      "patterns": [
+        { "name": "comment.block.sql", "begin": "/\\*", "end": "\\*/" },
+        { "name": "comment.line.double-dash.sql", "match": "--.*$" },
+        {
+          "name": "string.quoted.single.sql",
+          "begin": "'",
+          "end": "'",
+          "patterns": [{ "match": "''" }]
+        },
+        {
+          "name": "string.quoted.double.sql",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "match": "\"\"" }]
+        },
+        {
+          "name": "string.quoted.backtick.sql",
+          "begin": "`",
+          "end": "`",
+          "patterns": [{ "match": "``" }]
+        },
+        { "name": "entity.name.identifier.sql", "match": "\\[[^]\\r\\n]+\\]" },
+        {
+          "name": "variable.parameter.sql",
+          "match": ":[A-Za-z_$][A-Za-z0-9_$]*|\\?(?:\\d+)?|\\$\\d+"
+        },
+        {
+          "name": "keyword.control.sql",
+          "match": "\\b(?:SELECT|DISTINCT|FROM|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|ON|USING|AS|AND|OR|NOT|IN|IS|NULL|LIKE|ILIKE|BETWEEN|EXISTS|GROUP|BY|HAVING|ORDER|ASC|DESC|LIMIT|OFFSET|FETCH|FIRST|NEXT|ROWS|ONLY|TOP|RETURNING|INSERT|INTO|UPDATE|SET|DELETE|MERGE|WHEN|THEN|ELSE|END|CASE|WITH|RECURSIVE|UNION|INTERSECT|EXCEPT|ALL|ANY|CREATE|ALTER|DROP|TABLE|VIEW|INDEX|PRIMARY|FOREIGN|KEY|REFERENCES|CONSTRAINT|UNIQUE|CHECK|DEFAULT|DATABASE|SCHEMA|BEGIN|COMMIT|ROLLBACK|TRANSACTION|OVER|PARTITION|WINDOW|NULLS|PRECEDING|FOLLOWING|CURRENT|ROW)\\b"
+        },
+        { "name": "constant.language.sql", "match": "\\b(?:TRUE|FALSE|UNKNOWN)\\b" },
+        { "name": "support.function.sql", "match": "\\b[A-Za-z_$][A-Za-z0-9_$]*\\b(?=\\s*\\()" },
+        {
+          "name": "entity.name.table.sql",
+          "match": "\\b(?:FROM|JOIN|INTO|UPDATE|TABLE)\\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*)",
+          "captures": { "1": { "name": "entity.name.table.sql" } }
+        },
+        {
+          "name": "variable.other.column.sql",
+          "match": "\\b[A-Za-z_$][A-Za-z0-9_$]*\\.([A-Za-z_$][A-Za-z0-9_$]*)\\b",
+          "captures": { "1": { "name": "variable.other.column.sql" } }
+        },
+        { "name": "constant.numeric.sql", "match": "\\b\\d+(?:\\.\\d+)?\\b" },
+        { "name": "keyword.operator.sql", "match": "::|<>|!=|<=|>=|=|<|>|\\+|\\-|\\*|/|%" }
+      ]
+    }
+  }
 }

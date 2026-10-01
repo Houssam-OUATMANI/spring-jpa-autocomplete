@@ -8,6 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
+- Added generic SQL syntax highlighting for `@NativeQuery` and `@Query(nativeQuery = true)`.
 - Added grammar-based Java syntax-tree parsing for entity models, while retaining the previous parser as a fallback for incomplete source during editing.
 - Added mapped table and column completion for native queries using `@NativeQuery` and `@Query(nativeQuery = true)`.
 - Added extraction of explicit JPA entity, table, and column names, including JPQL validation against `@Entity(name = ...)`.

@@ -63,7 +63,8 @@
           "source.java"
         ],
         "embeddedLanguages": {
-          "meta.embedded.jpql": "jpql"
+          "meta.embedded.jpql": "jpql",
+          "meta.embedded.sql": "sql"
         }
       }
     ],
