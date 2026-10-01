@@ -299,6 +299,10 @@ export function isRepositoryMethodContext(sourcePrefix: string): boolean {
 		/\b(?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By\w*$/.test(linePrefix);
 }
 
+export function isRepositoryDeclarationHeader(sourcePrefix: string): boolean {
+	return /\b(?:interface|class)\s+\w*Repository\b[^{}]*$/.test(maskJavaSource(sourcePrefix));
+}
+
 export function isJpaPrefix(value: string): boolean {
 	return PREFIXES.some((prefix) => prefix.toLowerCase().startsWith(value.toLowerCase()));
 }

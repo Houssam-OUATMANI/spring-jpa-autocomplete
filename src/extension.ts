@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { clearEntityCache, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, WorkspaceEntityIndex } from './entityDiscovery';
-import { isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from './jpaKeywords';
+import { isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from './jpaKeywords';
 import { createKeywordItem } from './legacyHelpers';
 import { createDerivedQueryCompletions } from './derivedQuery/queryCompletion';
 import { validateDerivedMethodSignature, MethodSignatureInfo } from './derivedQuery/queryValidator';
@@ -208,6 +208,9 @@ export function activate(context: vscode.ExtensionContext) {
 			async provideCompletionItems(document, position) {
 				const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
 				const sourcePrefix = document.getText().slice(0, document.offsetAt(position));
+				if (isRepositoryDeclarationHeader(sourcePrefix)) {
+					return undefined;
+				}
 				const entities = await discoverEntities(document);
 
 				// A. JPQL Completion inside @Query

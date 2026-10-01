@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel } from '../entityModel';
 import { parseEntityModelAst } from '../javaAstParser';
-import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
+import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
 import { createKeywordItem, extractMethodParameterNames, shouldDisplayDiagnostic } from '../extension';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
@@ -48,6 +48,12 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(isRepositoryMethodContext('interface UserRepository extends JpaRepository<User, Long> {\n\tex'), true);
 		assert.strictEqual(isRepositoryMethodContext('interface UserRepository {\n}\nex'), false);
 		assert.strictEqual(isRepositoryMethodContext('class Service { String loadBy'), false);
+	});
+
+	test('leaves repository declaration headers to the Java language server', () => {
+		assert.strictEqual(isRepositoryDeclarationHeader('interface UserRepository extends JpaRepository<User, Long>'), true);
+		assert.strictEqual(isRepositoryDeclarationHeader('interface UserRepository {\n\tex'), false);
+		assert.strictEqual(isRepositoryDeclarationHeader('// interface FakeRepository extends JpaRepository<User, Long>'), false);
 	});
 
 	test('recognizes Spring Data JPA prefixes', () => {
