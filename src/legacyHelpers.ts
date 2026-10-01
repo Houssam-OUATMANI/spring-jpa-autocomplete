@@ -13,7 +13,8 @@ export function createKeywordItem(keyword: typeof JPA_KEYWORDS[number], word: st
 	item.detail = keyword.detail;
 	item.documentation = new vscode.MarkdownString(keyword.documentation);
 	item.filterText = keyword.label;
-	item.textEdit = vscode.TextEdit.replace(range, keyword.label);
+	item.insertText = keyword.label;
+	item.range = range;
 	item.sortText = keyword.kind === 'prefix' ? `0-${keyword.label}` : `1-${keyword.label}`;
 	if (word.length > 0 && !isJpaPrefix(word)) {
 		item.sortText = `2-${keyword.label}`;

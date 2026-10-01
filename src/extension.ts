@@ -207,6 +207,7 @@ export function activate(context: vscode.ExtensionContext) {
 		{
 			async provideCompletionItems(document, position) {
 				const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
+				const sourcePrefix = document.getText().slice(0, document.offsetAt(position));
 				const entities = await discoverEntities(document);
 
 				// A. JPQL Completion inside @Query
@@ -215,7 +216,7 @@ export function activate(context: vscode.ExtensionContext) {
 					return jpqlItems;
 				}
 
-				if (!isRepositoryMethodContext(linePrefix)) {
+				if (!isRepositoryMethodContext(sourcePrefix)) {
 					return undefined;
 				}
 
@@ -301,7 +302,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		if (isRepo) {
 			// A. Derived Query Methods Diagnostics (Validation of signature, return types, parameters, properties)
-			const methodRegex = /\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*;/g;
+			const methodRegex = /\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*(?:throws\s+[\w$.,\s]+)?;/g;
 			let methodMatch: RegExpExecArray | null;
 
 			while ((methodMatch = methodRegex.exec(docText)) !== null) {

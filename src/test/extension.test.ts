@@ -42,8 +42,11 @@ suite('Extension Test Suite', () => {
 		]);
 	});
 
-	test('recognizes repository method contexts', () => {
+	test('recognizes method prefixes only inside a repository body', () => {
 		assert.strictEqual(isRepositoryMethodContext('interface UserRepository { Optional<User> findBy'), true);
+		assert.strictEqual(isRepositoryMethodContext('interface UserRepository extends JpaRepository<User, Long>'), false);
+		assert.strictEqual(isRepositoryMethodContext('interface UserRepository extends JpaRepository<User, Long> {\n\tex'), true);
+		assert.strictEqual(isRepositoryMethodContext('interface UserRepository {\n}\nex'), false);
 		assert.strictEqual(isRepositoryMethodContext('class Service { String loadBy'), false);
 	});
 
@@ -596,6 +599,19 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(queries[0].methodSignature?.parameters[1].paramName, 'ids');
 	});
 
+	test('extracts JPQL method signatures that declare checked exceptions', () => {
+		const user = { name: 'User', uri: vscode.Uri.parse('file:///User.java'), properties: [{ name: 'id', type: 'Long' }] };
+		const query = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u WHERE u.id = :id") User find(@Param("id") Long id) throws java.io.IOException;',
+			[user],
+		)[0];
+
+		assert.ok(query);
+		assert.strictEqual(query.methodSignature?.methodName, 'find');
+		assert.strictEqual(query.methodSignature?.parameters[0].name, 'id');
+		assert.strictEqual(validateJpql(query, [user]).length, 0);
+	});
+
 	test('preserves Java source offsets after supplementary Unicode characters', () => {
 		const source = '// 😀 @Query("ignored")\n@Query("SELECT u FROM User u")';
 		const masked = maskJavaSource(source);
@@ -976,9 +992,9 @@ suite('Extension Test Suite', () => {
 
 	test('replaces a typed keyword instead of appending it', () => {
 		const item = createKeywordItem(JPA_KEYWORDS.find((keyword) => keyword.label === 'existsBy')!, 'ex', new vscode.Range(new vscode.Position(0, 3), new vscode.Position(0, 5)));
-		const edit = item.textEdit as vscode.TextEdit;
-		assert.strictEqual(edit.newText, 'existsBy');
-		assert.strictEqual(edit.range.start.character, 3);
-		assert.strictEqual(edit.range.end.character, 5);
+		const range = item.range as vscode.Range;
+		assert.strictEqual(item.insertText, 'existsBy');
+		assert.strictEqual(range.start.character, 3);
+		assert.strictEqual(range.end.character, 5);
 	});
 });

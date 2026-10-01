@@ -1,3 +1,5 @@
+import { maskJavaSource } from './javaParsing';
+
 export type KeywordKind = 'prefix' | 'operator' | 'modifier';
 
 export interface JpaKeyword {
@@ -271,8 +273,29 @@ function capitalize(value: string): string {
 	return value[0].toUpperCase() + value.slice(1);
 }
 
-export function isRepositoryMethodContext(linePrefix: string): boolean {
-	return /(?:interface|class)\s+\w*Repository\b/.test(linePrefix) ||
+export function isRepositoryMethodContext(sourcePrefix: string): boolean {
+	const maskedPrefix = maskJavaSource(sourcePrefix);
+	const declarations = [...maskedPrefix.matchAll(/\b(?:interface|class)\s+\w*Repository\b[^{}]*\{/g)];
+	const declaration = declarations.at(-1);
+	if (!declaration) {
+		return false;
+	}
+
+	let bodyDepth = 1;
+	for (let offset = (declaration.index ?? 0) + declaration[0].length; offset < maskedPrefix.length; offset++) {
+		if (maskedPrefix[offset] === '{') {
+			bodyDepth++;
+		} else if (maskedPrefix[offset] === '}') {
+			bodyDepth--;
+		}
+	}
+	if (bodyDepth !== 1) {
+		return false;
+	}
+
+	const linePrefix = sourcePrefix.slice(Math.max(sourcePrefix.lastIndexOf('\n'), sourcePrefix.lastIndexOf('\r')) + 1);
+	const partialWord = linePrefix.match(/[A-Za-z]*$/)?.[0] ?? '';
+	return isJpaPrefix(partialWord) ||
 		/\b(?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By\w*$/.test(linePrefix);
 }
 

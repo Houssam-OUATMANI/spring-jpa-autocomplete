@@ -51,7 +51,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			continue;
 		}
 		const fullMatch = documentText.slice(match.index, methodEnd);
-		const signatureMatch = maskedText.slice(argsEnd + 1, methodEnd).match(/(?:@\w+(?:\([^)]*\))?\s*)*([\w$<>?.[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*;/);
+		const signatureMatch = maskedText.slice(argsEnd + 1, methodEnd).match(/(?:@\w+(?:\([^)]*\))?\s*)*([\w$<>?.[\]\s]+?)\s+([A-Za-z_$]\w*)\s*\(([\s\S]*?)\)\s*(?:throws\s+[\w$.,\s]+)?;/);
 		if (!signatureMatch) {
 			queryAnnotationRegex.lastIndex = argsEnd + 1;
 			continue;
@@ -165,7 +165,7 @@ function findClosingParenthesis(text: string, openingOffset: number): number {
 
 function findMethodEnd(text: string, startOffset: number): number {
 	const methodText = text.slice(startOffset);
-	const methodMatch = methodText.match(/^(?:\s*@\w+(?:\([^)]*\))?\s*)*[\w$<>?.[\]\s]+?\s+[A-Za-z_$]\w*\s*\(([\s\S]*?)\)\s*;/);
+	const methodMatch = methodText.match(/^(?:\s*@\w+(?:\([^)]*\))?\s*)*[\w$<>?.[\]\s]+?\s+[A-Za-z_$]\w*\s*\(([\s\S]*?)\)\s*(?:throws\s+[\w$.,\s]+)?;/);
 	return methodMatch ? startOffset + methodMatch[0].length : -1;
 }
 
