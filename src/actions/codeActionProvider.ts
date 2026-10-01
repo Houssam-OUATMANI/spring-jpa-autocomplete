@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 
 interface SpringJpaDiagnostic extends vscode.Diagnostic {
 	missingParam?: { name: string; type: string };
+	missingParams?: readonly { name: string; type: string }[];
 	suggestedProperty?: string;
 	expectedReturnType?: string;
 }
@@ -76,18 +77,21 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					actions.push(action);
 				}
 			} else if (code === 'MISSING_PARAMETER') {
-				const missingParam = springDiagnostic.missingParam ?? parseMissingParameter(diagnostic.message);
-				if (missingParam) {
+				const missingParams = springDiagnostic.missingParams
+					?? (springDiagnostic.missingParam ? [springDiagnostic.missingParam] : parseMissingParameters(diagnostic.message));
+				if (missingParams.length > 0) {
 					const lineText = document.lineAt(diagnostic.range.start.line).text;
 					const closeParen = lineText.indexOf(')', diagnostic.range.end.character);
 					if (closeParen >= 0) {
 						const parenPos = new vscode.Position(diagnostic.range.start.line, closeParen);
 						const hasParamsBefore = lineText.slice(0, closeParen).trim().slice(-1) !== '(';
-						const nextParam = `${missingParam.type} ${missingParam.name}`;
-						const insertion = hasParamsBefore ? `, ${nextParam}` : nextParam;
+						const parameters = missingParams.map(({ type, name }) => `${type} ${name}`).join(', ');
+						const insertion = hasParamsBefore ? `, ${parameters}` : parameters;
 
 						const action = new vscode.CodeAction(
-							`Add parameter '${nextParam}' to method signature`,
+							missingParams.length === 1
+								? `Add parameter '${parameters}' to method signature`
+								: `Add ${missingParams.length} missing parameters to method signature`,
 							vscode.CodeActionKind.QuickFix,
 						);
 						action.edit = new vscode.WorkspaceEdit();
@@ -114,15 +118,16 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 	}
 }
 
-function parseMissingParameter(message: string): { name: string; type: string } | undefined {
+function parseMissingParameters(message: string): { name: string; type: string }[] {
 	const match = message.match(/expects at least \d+ parameter\(s\) \(([^)]+)\)/);
 	if (!match) {
-		return undefined;
+		return [];
 	}
 	const foundCount = Number(message.match(/but found (\d+)/)?.[1] ?? 0);
-	const lastParameter = match[1].split(',')[foundCount]?.trim();
-	const parameterMatch = lastParameter?.match(/^(.+)\s+([A-Za-z_$]\w*)$/);
-	return parameterMatch ? { type: parameterMatch[1], name: parameterMatch[2] } : undefined;
+	return match[1].split(',').slice(foundCount).flatMap((parameter) => {
+		const parameterMatch = parameter.trim().match(/^(.+)\s+([A-Za-z_$]\w*)$/);
+		return parameterMatch ? [{ type: parameterMatch[1], name: parameterMatch[2] }] : [];
+	});
 }
 
 function addImportIfMissing(edit: vscode.WorkspaceEdit, document: vscode.TextDocument, importName: string): void {

@@ -377,6 +377,28 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(diags.length, 1);
 		assert.strictEqual(diags[0].code, 'MISSING_PARAMETER');
 		assert.strictEqual(diags[0].missingParam?.name, 'active');
+		assert.deepStrictEqual(diags[0].missingParams, [{ name: 'active', type: 'boolean' }]);
+	});
+
+	test('collects all missing parameters for multi-predicate methods', () => {
+		const diagnostics = validateDerivedMethodSignature({
+			rawText: 'Boolean existsByCreatedAtOrTitleOrContent();',
+			returnType: 'Boolean',
+			methodName: 'existsByCreatedAtOrTitleOrContent',
+			parameters: [],
+			startOffset: 0,
+			endOffset: 45,
+		}, [
+			{ name: 'createdAt', type: 'Instant' },
+			{ name: 'title', type: 'String' },
+			{ name: 'content', type: 'String' },
+		]);
+
+		assert.deepStrictEqual(diagnostics.find((diagnostic) => diagnostic.code === 'MISSING_PARAMETER')?.missingParams, [
+			{ name: 'createdAt', type: 'Instant' },
+			{ name: 'title', type: 'String' },
+			{ name: 'content', type: 'String' },
+		]);
 	});
 
 	test('warns when Page return type lacks Pageable parameter', () => {
@@ -874,6 +896,34 @@ suite('Extension Test Suite', () => {
 
 		const actions = provider.provideCodeActions(doc, diagnostic.range, { diagnostics: [diagnostic] } as any, {} as any);
 		assert.strictEqual(actions[0].title, "Add parameter 'String firstname' to method signature");
+	});
+
+	test('adds every missing parameter in one Quick Fix', () => {
+		const provider = new SpringJpaCodeActionProvider();
+		const line = 'Boolean existsByCreatedAtOrTitleOrContent();';
+		const doc = {
+			uri: vscode.Uri.parse('file:///UserRepository.java'),
+			lineAt: () => ({ text: line }),
+		} as any;
+		const diagnostic = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 8), new vscode.Position(0, line.indexOf('('))),
+			"Derived query method 'existsByCreatedAtOrTitleOrContent' expects at least 3 parameter(s), but found 0.",
+			vscode.DiagnosticSeverity.Error,
+		) as vscode.Diagnostic & { missingParams: { name: string; type: string }[] };
+		diagnostic.source = 'spring-jpa';
+		diagnostic.code = 'MISSING_PARAMETER';
+		diagnostic.missingParams = [
+			{ name: 'createdAt', type: 'Instant' },
+			{ name: 'title', type: 'String' },
+			{ name: 'content', type: 'String' },
+		];
+
+		const actions = provider.provideCodeActions(doc, diagnostic.range, { diagnostics: [diagnostic] } as any, {} as any);
+		assert.strictEqual(actions.length, 1);
+		assert.strictEqual(actions[0].title, 'Add 3 missing parameters to method signature');
+		const edit = actions[0].edit!;
+		const insertedText = edit.entries()[0][1][0].newText;
+		assert.strictEqual(insertedText, 'Instant createdAt, String title, String content');
 	});
 
 	test('generates repository methods with the expected Spring Data signature', () => {

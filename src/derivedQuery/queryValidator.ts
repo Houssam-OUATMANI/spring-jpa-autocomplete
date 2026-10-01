@@ -19,6 +19,7 @@ export interface DerivedMethodValidationDiagnostic {
 	readonly code?: 'INVALID_RETURN_TYPE' | 'MISSING_PARAMETER' | 'EXTRA_PARAMETER' | 'UNKNOWN_PROPERTY' | 'MISSING_PAGEABLE' | 'INVALID_PARAMETER_TYPE';
 	readonly expectedReturnType?: string;
 	readonly missingParam?: { name: string; type: string };
+	readonly missingParams?: readonly { name: string; type: string }[];
 	readonly suggestedProperty?: string;
 }
 
@@ -178,7 +179,7 @@ function validateParameters(
 
 	if (normalParams.length < expected.length) {
 		const missingCount = expected.length - normalParams.length;
-		const nextExpected = expected[normalParams.length];
+		const missingParams = expected.slice(normalParams.length).map(({ name, type }) => ({ name, type }));
 		const methodOffsetInSig = signature.rawText.indexOf(signature.methodName);
 		const start = signature.startOffset + methodOffsetInSig;
 		const end = start + signature.methodName.length;
@@ -189,7 +190,8 @@ function validateParameters(
 			startOffset: start,
 			endOffset: end,
 			code: 'MISSING_PARAMETER',
-			missingParam: nextExpected ? { name: nextExpected.name, type: nextExpected.type } : undefined,
+			missingParam: missingParams[0],
+			missingParams,
 		});
 	} else if (normalParams.length > expected.length) {
 		const methodOffsetInSig = signature.rawText.indexOf(signature.methodName);

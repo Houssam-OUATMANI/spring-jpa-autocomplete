@@ -116,6 +116,9 @@ export class WorkspaceEdit {
 	public getEntries() {
 		return this.edits;
 	}
+	public entries(): [Uri, TextEdit[]][] {
+		return [...this.edits.entries()].map(([uri, edits]) => [Uri.parse(uri), edits]);
+	}
 }
 
 export enum CodeActionKind {

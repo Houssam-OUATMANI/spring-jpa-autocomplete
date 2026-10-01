@@ -343,6 +343,9 @@ export function activate(context: vscode.ExtensionContext) {
 					if (d.missingParam) {
 						(diagnostic as vscode.Diagnostic & { missingParam?: typeof d.missingParam }).missingParam = d.missingParam;
 					}
+					if (d.missingParams) {
+						(diagnostic as vscode.Diagnostic & { missingParams?: typeof d.missingParams }).missingParams = d.missingParams;
+					}
 					if (d.expectedReturnType) {
 						(diagnostic as vscode.Diagnostic & { expectedReturnType?: string }).expectedReturnType = d.expectedReturnType;
 					}
