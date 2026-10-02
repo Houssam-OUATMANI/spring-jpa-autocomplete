@@ -19,6 +19,9 @@ export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers'
 
 export type DiagnosticDisplayMode = 'all' | 'errors' | 'warnings' | 'off';
 
+const INSTALLATION_WELCOME_KEY = 'springJpa.installationWelcomeShown';
+const GITHUB_REPOSITORY_URL = 'https://github.com/Houssam-OUATMANI/spring-jpa-autocomplete';
+
 export function shouldDisplayDiagnostic(mode: DiagnosticDisplayMode, severity: 'error' | 'warning'): boolean {
 	return mode === 'all' || (mode === 'errors' && severity === 'error') || (mode === 'warnings' && severity === 'warning');
 }
@@ -29,6 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
+	void showInstallationWelcome(context, output);
 
 	const rebuildIndex = vscode.commands.registerCommand('springJpa.rebuildIndex', async () => {
 		const started = Date.now();
@@ -481,6 +485,30 @@ export function activate(context: vscode.ExtensionContext) {
 			diagnosticTimers.clear();
 		},
 	});
+}
+
+async function showInstallationWelcome(context: vscode.ExtensionContext, output: vscode.OutputChannel): Promise<void> {
+	if (context.globalState.get<boolean>(INSTALLATION_WELCOME_KEY, false)) {
+		return;
+	}
+
+	try {
+		await context.globalState.update(INSTALLATION_WELCOME_KEY, true);
+		const action = await vscode.window.showInformationMessage(
+			'Thanks for installing Spring Data JPA Tools! If you find it useful, please consider supporting the project by starring it on GitHub.',
+			'⭐ Star on GitHub',
+		);
+		if (action === '⭐ Star on GitHub') {
+			const opened = await vscode.env.openExternal(vscode.Uri.parse(GITHUB_REPOSITORY_URL));
+			if (!opened) {
+				vscode.window.showErrorMessage('Could not open the GitHub repository. You can find it at github.com/Houssam-OUATMANI/spring-jpa-autocomplete.');
+			}
+		}
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		output.appendLine(`Could not show the installation welcome message: ${message}`);
+		vscode.window.showErrorMessage(`Could not show the Spring Data JPA Tools welcome message: ${message}`);
+	}
 }
 
 function parseMethodParameters(paramsText: string): { name: string; type: string }[] {

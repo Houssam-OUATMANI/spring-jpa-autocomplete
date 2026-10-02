@@ -144,6 +144,8 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 
 Install the extension, open a Java project, and start editing a Spring Data repository. Completion and diagnostics activate automatically. Use `F12` to navigate to a property, `Alt+Enter` to apply a Quick Fix, or run `Spring JPA: Generate Repository Method` from the Command Palette with the cursor on an entity property.
 
+On first activation after installation, the extension displays a one-time English welcome message with a button to visit and star the project on GitHub.
+
 ## Development
 
 ```bash

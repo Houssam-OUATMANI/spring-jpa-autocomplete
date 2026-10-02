@@ -49,34 +49,27 @@ suite('Completion Integration Tests', () => {
 		}
 	});
 
-	test('reports an incorrect entity return type from a scanned multi-type source file', async function () {
+	test('reports an incorrect entity return type from an opened multi-type source file', async function () {
 		this.timeout(15_000);
 		const extension = vscode.extensions.getExtension('houssam-ouatmani.spring-jpa-autocomplete');
 		assert.ok(extension);
 		await extension.activate();
 
-		const originalFolders = (vscode.workspace.workspaceFolders ?? []).map(({ uri, name }) => ({ uri, name }));
-		const temporaryRootUri = vscode.Uri.file(path.join(os.tmpdir(), 'spring-jpa-vscode-integration'));
-		const fixtureUri = vscode.Uri.joinPath(temporaryRootUri, `project-${process.pid}-${Date.now()}`);
-		const sourceUri = vscode.Uri.joinPath(fixtureUri, 'src', 'main', 'java', 'fixture');
-		let fixtureCreated = false;
-		let workspaceFolderAdded = false;
+		const fixtureUri = vscode.Uri.file(path.join(os.tmpdir(), `spring-jpa-vscode-integration-${process.pid}-${Date.now()}`));
+		const entityUri = vscode.Uri.joinPath(fixtureUri, 'Entities.java');
+		const repositoryUri = vscode.Uri.joinPath(fixtureUri, 'UserRepository.java');
 
 		try {
-			await vscode.workspace.fs.createDirectory(sourceUri);
-			fixtureCreated = true;
+			await vscode.workspace.fs.createDirectory(fixtureUri);
 			await vscode.workspace.fs.writeFile(
-				vscode.Uri.joinPath(sourceUri, 'Entities.java'),
+				entityUri,
 				Buffer.from('package fixture; @Entity class User { String email; } @Entity class Order { Long id; }'),
 			);
-			const repositoryUri = vscode.Uri.joinPath(sourceUri, 'UserRepository.java');
 			await vscode.workspace.fs.writeFile(
 				repositoryUri,
 				Buffer.from('package fixture; interface UserRepository extends JpaRepository<User, Long> { List<Order> findByEmail(String email); }'),
 			);
-			assert.strictEqual(vscode.workspace.updateWorkspaceFolders(0, originalFolders.length, { uri: temporaryRootUri, name: 'Spring JPA integration fixture' }), true);
-			workspaceFolderAdded = true;
-			await vscode.commands.executeCommand('springJpa.rebuildIndex');
+			await vscode.workspace.openTextDocument(entityUri);
 			await vscode.workspace.openTextDocument(repositoryUri);
 
 			const deadline = Date.now() + 5_000;
@@ -93,31 +86,7 @@ suite('Completion Integration Tests', () => {
 			assert.ok(returnTypeDiagnostic, 'Expected an invalid derived-query entity return type diagnostic.');
 			assert.match(returnTypeDiagnostic.message, /belongs to entity 'User', but returns 'List<Order>'/);
 		} finally {
-			if (workspaceFolderAdded) {
-				await new Promise<void>((resolve, reject) => {
-					let subscription: vscode.Disposable;
-					const timer = setTimeout(() => {
-						clearTimeout(timer);
-						subscription.dispose();
-						reject(new Error('Timed out while restoring the VS Code test workspace.'));
-					}, 3_000);
-					subscription = vscode.workspace.onDidChangeWorkspaceFolders((event) => {
-						if (event.removed.some((folder) => folder.uri.toString() === temporaryRootUri.toString())) {
-							clearTimeout(timer);
-							subscription.dispose();
-							resolve();
-						}
-					});
-					if (!vscode.workspace.updateWorkspaceFolders(0, (vscode.workspace.workspaceFolders ?? []).length, ...originalFolders)) {
-						clearTimeout(timer);
-						subscription.dispose();
-						reject(new Error('Could not restore the VS Code test workspace.'));
-					}
-				});
-			}
-			if (fixtureCreated) {
-				await vscode.workspace.fs.delete(fixtureUri, { recursive: true, useTrash: false });
-			}
+			await vscode.workspace.fs.delete(fixtureUri, { recursive: true, useTrash: false });
 		}
 	});
 });

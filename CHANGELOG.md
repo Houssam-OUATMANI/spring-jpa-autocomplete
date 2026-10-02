@@ -8,6 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
+- Added a one-time English welcome notification after installation, with a button to open and star the GitHub repository.
 - Added native SQL dialect support across the main Spring/JPA database vendors, including PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
 - Added automatic dialect detection from Spring/Hibernate configuration and JDBC URLs.
 - Added a workspace-level and current-file override for SQL dialect selection in native queries.
