@@ -4,7 +4,17 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
+## [1.0.0] - In progress
+
+### Added
+
+- Added native SQL dialect support across the main Spring/JPA database vendors, including PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
+- Added automatic dialect detection from Spring/Hibernate configuration and JDBC URLs.
+- Added a workspace-level and current-file override for SQL dialect selection in native queries.
+
+### Improved
+
+- Kept the generic SQL fallback for unsupported providers while preserving better dialect-specific keyword suggestions when a dialect is known.
 
 ## [0.9.9] - 2026-10-02
 

@@ -1,8 +1,10 @@
 # Spring Data JPA Tools
 
-**Version 0.9.9** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
+**Version 1.0.0 (upcoming)** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 
 Write Spring Data JPA repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and entity models.
+
+> The next major release is currently in progress and not yet published to the Marketplace. The current released version remains 0.9.9.
 
 ## See It in Action
 
@@ -56,7 +58,7 @@ The Quick Fix infers the three property types and adds all required parameters t
 List<User> searchByEmail(@Param("email") String email);
 ```
 
-Native query strings receive SQL syntax highlighting and mapped table / column suggestions from `@Table`, `@Column`, and `@JoinColumn`. `@NativeQuery` is supported as well. Highlighting is currently generic SQL; dialect-specific validation is not enabled.
+Native query strings receive SQL syntax highlighting and mapped table / column suggestions from `@Table`, `@Column`, and `@JoinColumn`. `@NativeQuery` is supported as well. The extension also recognizes common SQL dialect keywords for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2, with auto-detection from Spring/Hibernate settings or JDBC URLs and an override at workspace or file level.
 
 ## Feature Reference
 
@@ -98,6 +100,8 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
   - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LEFT JOIN`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
   - Hover documentation recognizes compound join keywords such as `LEFT JOIN`, `LEFT OUTER JOIN`, and `INNER JOIN` as a single JPQL construct.
 - **Native SQL support**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with SQL syntax highlighting and table / mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.
+  - SQL dialect awareness for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
+  - Auto-detection from Spring/Hibernate settings and JDBC URLs, with a workspace-level override and a per-file override for active native queries.
 - **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
   - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
   - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
@@ -139,7 +143,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The current version is `0.9.9`; release notes are in [CHANGELOG.md](CHANGELOG.md).
+The latest release is `0.9.9`; the v1 roadmap is in progress and the release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
