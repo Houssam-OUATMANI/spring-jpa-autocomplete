@@ -11,10 +11,15 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Added native SQL dialect support across the main Spring/JPA database vendors, including PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
 - Added automatic dialect detection from Spring/Hibernate configuration and JDBC URLs.
 - Added a workspace-level and current-file override for SQL dialect selection in native queries.
+- Added validation for derived-query return types that resolve to a different known JPA entity than the repository's entity.
+- Added indexing for every supported top-level JPA entity, mapped superclass, embeddable, and projection declared in a Java source file.
+- Added VS Code integration coverage for workspace scanning of multi-type files and derived-query return type diagnostics.
 
 ### Improved
 
 - Kept the generic SQL fallback for unsupported providers while preserving better dialect-specific keyword suggestions when a dialect is known.
+- Preserved DTO and projection return types when their type is not known as a different JPA entity.
+- Made JPQL entity and named-parameter completions use the query context across text-block lines.
 
 ## [0.9.9] - 2026-10-02
 

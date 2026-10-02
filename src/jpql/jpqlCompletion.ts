@@ -23,6 +23,9 @@ export function createJpqlCompletions(
 	const activeQuery = queries.find(
 		(q) => offset >= q.queryStartOffset && offset <= q.queryEndOffset,
 	);
+	const queryPrefix = activeQuery
+		? activeQuery.queryContent.slice(0, queryOffsetAt(activeQuery.sourceOffsets, offset))
+		: linePrefix;
 	if (activeQuery?.isNative) {
 		return createNativeSqlCompletions(document, position, entities, queries, sqlDialect);
 	}
@@ -37,7 +40,7 @@ export function createJpqlCompletions(
 		}
 	}
 	const items: vscode.CompletionItem[] = [];
-	const dtoMatch = linePrefix.match(/\bNEW\s+([\w$.]*)$/i);
+	const dtoMatch = queryPrefix.match(/\bNEW\s+([\w$.]*)$/i);
 	if (dtoMatch) {
 		const typedType = dtoMatch[1];
 		const partial = typedType.split('.').pop() ?? '';
@@ -63,7 +66,7 @@ export function createJpqlCompletions(
 			return dtoItems;
 		}
 	}
-	const positionalMatch = linePrefix.match(/\?(\d*)$/);
+	const positionalMatch = queryPrefix.match(/\?(\d*)$/);
 	if (positionalMatch && activeQuery?.methodSignature) {
 		const partial = positionalMatch[1];
 		const placeholderStart = offset - partial.length - 1;
@@ -80,7 +83,7 @@ export function createJpqlCompletions(
 	}
 
 	// 1. Check for alias property completion: e.g. "u."
-	const aliasPropMatch = linePrefix.match(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
+	const aliasPropMatch = queryPrefix.match(/\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\.([A-Za-z_]\w*)?$/);
 	if (aliasPropMatch) {
 		const path = aliasPropMatch[1].split('.');
 		const alias = path[0];
@@ -93,7 +96,7 @@ export function createJpqlCompletions(
 		let targetEntityName = activeQuery?.aliases.get(alias);
 		if (!targetEntityName) {
 			// Fallback: search query content for "FROM User u"
-			const fromMatch = linePrefix.match(new RegExp(`\\bFROM\\s+([A-Z]\\w*)\\s+${alias}\\b`, 'i'));
+			const fromMatch = queryPrefix.match(new RegExp(`\\bFROM\\s+([A-Z]\\w*)\\s+${alias}\\b`, 'i'));
 			if (fromMatch) {
 				targetEntityName = fromMatch[1];
 			}
@@ -128,7 +131,7 @@ export function createJpqlCompletions(
 	}
 
 	// 2. Check for named parameter completion after ":"
-	const colonMatch = linePrefix.match(/:([A-Za-z_]\w*)?$/);
+	const colonMatch = queryPrefix.match(/:([A-Za-z_]\w*)?$/);
 	if (colonMatch && activeQuery?.methodSignature) {
 		const partial = colonMatch[1] ?? '';
 		const startPos = new vscode.Position(position.line, position.character - partial.length);
@@ -148,7 +151,7 @@ export function createJpqlCompletions(
 	}
 
 	// 3. Check for entity completion after FROM or JOIN
-	const fromOrJoinMatch = linePrefix.match(/\b(?:FROM|JOIN)\s+([A-Z]\w*)?$/i);
+	const fromOrJoinMatch = queryPrefix.match(/\b(?:FROM|JOIN)\s+([A-Z]\w*)?$/i);
 	if (fromOrJoinMatch) {
 		const partial = fromOrJoinMatch[1] ?? '';
 		const startPos = new vscode.Position(position.line, position.character - partial.length);
@@ -183,4 +186,9 @@ export function createJpqlCompletions(
 	}
 
 	return items.length > 0 ? items : undefined;
+}
+
+function queryOffsetAt(sourceOffsets: readonly number[], documentOffset: number): number {
+	const index = sourceOffsets.findIndex((sourceOffset) => sourceOffset >= documentOffset);
+	return index < 0 ? sourceOffsets.length : index;
 }

@@ -342,13 +342,18 @@ export function activate(context: vscode.ExtensionContext) {
 				const paramsText = methodMatch[3];
 				const startOffset = methodMatch.index;
 				const endOffset = methodMatch.index + fullText.length;
+				const repositoryEntityName = extractRepositoryEntityNameAt(docText, startOffset);
 
-				const properties = findEntityProperties(docText, entities, extractRepositoryEntityNameAt(docText, startOffset));
+				const properties = findEntityProperties(docText, entities, repositoryEntityName);
 				const parameters = parseMethodParameters(paramsText);
 				const sig: MethodSignatureInfo = {
 					rawText: fullText,
 					returnType,
 					methodName,
+					entityName: repositoryEntityName,
+					knownEntityNames: entities
+						.filter((entity) => entity.isEntity)
+						.flatMap((entity) => [entity.name, entity.entityName].filter((name): name is string => Boolean(name))),
 					parameters,
 					startOffset,
 					endOffset,

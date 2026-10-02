@@ -18,11 +18,16 @@ type AstElement = CstNode | IToken;
 const { parse } = require('java-parser') as { parse: (source: string) => CstNode };
 
 export function parseEntityModelAst(text: string, uri: EntityInfo['uri']): EntityInfo | undefined {
+	return parseEntityModelsAst(text, uri)[0];
+}
+
+export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): EntityInfo[] {
 	const root = parse(text);
 	const unit = childNodes(root, 'ordinaryCompilationUnit')[0];
 	if (!unit) {
-		return undefined;
+		return [];
 	}
+	const entities: EntityInfo[] = [];
 	const packageDeclaration = childNodes(unit, 'packageDeclaration')[0];
 	const packageIdentifiers = childTokens(packageDeclaration, 'Identifier');
 	const packageName = packageIdentifiers.length > 0
@@ -112,12 +117,13 @@ export function parseEntityModelAst(text: string, uri: EntityInfo['uri']): Entit
 		const superType = childNodes(normalClass!, 'classExtends')[0];
 		const superClassType = childNodes(superType, 'classType')[0];
 		const superclassName = superClassType ? allTokens(superClassType).find((token) => token.tokenType.name === 'Identifier')?.image : undefined;
-		return {
+		entities.push({
 			name: identifier.image,
 			entityName: annotationValue(typeAnnotations, 'Entity', 'name'),
 			tableName: annotationValue(typeAnnotations, 'Table', 'name'),
 			packageName,
 			uri,
+			...(isEntity ? { isEntity: true } : {}),
 			isProjection: isProjection || undefined,
 			superclassName,
 			isMappedSuperclass,
@@ -126,10 +132,10 @@ export function parseEntityModelAst(text: string, uri: EntityInfo['uri']): Entit
 				? [...properties.values()]
 				: [...properties.values()].sort((left, right) => left.name.localeCompare(right.name)),
 			location: location(text, identifier.startOffset, identifier.endOffset - identifier.startOffset + 1),
-		};
+		});
 	}
 
-	return undefined;
+	return entities;
 }
 
 function addFields(field: CstNode, text: string, properties: Map<string, EntityProperty>): void {

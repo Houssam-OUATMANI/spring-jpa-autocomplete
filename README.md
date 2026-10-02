@@ -25,6 +25,15 @@ interface UserRepository extends JpaRepository<User, Long> {
 
 Complete after `findBy` to browse entity properties, then continue with operators, `And` / `Or`, or `OrderBy`. The extension checks property names, argument count and types, return types, and pagination parameters as you edit.
 
+Return types are also checked against the repository entity when the declared result is another indexed JPA entity. Projection and DTO types that are not known JPA entities remain valid.
+
+```java
+interface UserRepository extends JpaRepository<User, Long> {
+  List<Order> findByEmail(String email); // diagnostic: this repository manages User
+  List<UserSummary> findByActive(boolean active); // allowed as a projection
+}
+```
+
 ### Catch JPQL mistakes before running the application
 
 ```java
@@ -66,6 +75,7 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 - **Completion ordering**: entity properties are displayed before operators and keywords.
 - **Entity & Property model**:
   - Grammar-based Java syntax-tree parsing for entity declarations, fields, annotations, records, and projections, with the existing parser retained as a fallback for incomplete source while typing.
+  - Indexes multiple top-level JPA types declared in the same Java source file.
   - Support for `@Entity`, `@MappedSuperclass` inheritance, `@Embeddable`, and Java records.
   - JPA entity names (`@Entity(name = ...)`), physical table names (`@Table`), and physical column names (`@Column` / `@JoinColumn`).
   - Support for Spring Data projection interfaces based on `getX()`, `isX()`, and `hasX()` accessors.
@@ -81,6 +91,7 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
   - Parameter validation: flags missing or extra method parameters and missing `Pageable` on `Page` return types.
   - `OrderBy` property validation.
   - Parameter type validation, including collection parameters for `In` / `NotIn`.
+  - Return-type validation catches a method returning a different indexed JPA entity than the repository manages, while allowing DTO/projection return types.
   - Typo suggestions for unknown entity properties.
 - **Advanced JPQL support**:
   - Single-line and multi-line Java 15+ Text Blocks (`""" SELECT ... """`).
@@ -97,6 +108,7 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
   - Return-type validation between the JPQL `SELECT` entity and the repository method, including collection, optional, page, and slice results.
   - JPQL vocabulary and completion for clauses, operators, aggregates, string, numeric, temporal, collection, type, and custom functions.
   - Syntax highlighting inside `@Query` strings and text blocks for clauses, entities, aliases, properties, parameters, operators, functions, literals, and numbers.
+  - Entity, alias-property, and named-parameter completions use context from earlier lines in JPQL text blocks.
   - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LEFT JOIN`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
   - Hover documentation recognizes compound join keywords such as `LEFT JOIN`, `LEFT OUTER JOIN`, and `INNER JOIN` as a single JPQL construct.
 - **Native SQL support**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with SQL syntax highlighting and table / mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.

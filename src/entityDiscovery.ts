@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { EntityInfo, EntityProperty, parseEntityModel, PropertyLocation } from './entityModel';
+import { EntityInfo, EntityProperty, parseEntityModels, PropertyLocation } from './entityModel';
 
 export { EntityInfo, EntityProperty, PropertyLocation };
 
@@ -16,7 +16,7 @@ function sourceFingerprint(text: string): string {
 
 export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
-	private entitiesByUri = new Map<string, EntityInfo>();
+	private entitiesByUri = new Map<string, readonly EntityInfo[]>();
 	private entitiesByName = new Map<string, EntityInfo[]>();
 	private sourceFingerprints = new Map<string, string>();
 	private isInitialized = false;
@@ -55,20 +55,20 @@ export class WorkspaceEntityIndex {
 		const text = document.getText();
 		const fingerprint = sourceFingerprint(text);
 		if (this.sourceFingerprints.get(uriKey) === fingerprint) {
-			return this.entitiesByUri.get(uriKey);
+			return this.entitiesByUri.get(uriKey)?.[0];
 		}
-		const previousEntity = this.entitiesByUri.get(uriKey);
-		const entity = parseEntityModel(text, document.uri);
+		const previousEntities = this.entitiesByUri.get(uriKey);
+		const entities = parseEntityModels(text, document.uri);
 		this.sourceFingerprints.set(uriKey, fingerprint);
-		if (entity) {
-			this.entitiesByUri.set(uriKey, entity);
+		if (entities.length > 0) {
+			this.entitiesByUri.set(uriKey, entities);
 		} else {
 			this.entitiesByUri.delete(uriKey);
 		}
-		if (previousEntity || entity) {
+		if (previousEntities || entities.length > 0) {
 			this.rebuildNameIndex();
 		}
-		return entity;
+		return entities[0];
 	}
 
 	public removeUri(uri: vscode.Uri): void {
@@ -88,7 +88,11 @@ export class WorkspaceEntityIndex {
 	}
 
 	public getAllEntities(): readonly EntityInfo[] {
-		return [...this.entitiesByUri.values()];
+		return [...this.entitiesByUri.values()].flat();
+	}
+
+	public getEntitiesForUri(uri: vscode.Uri): readonly EntityInfo[] {
+		return this.entitiesByUri.get(uri.toString()) ?? [];
 	}
 
 	private async scanWorkspace(): Promise<void> {
@@ -105,7 +109,7 @@ export class WorkspaceEntityIndex {
 					try {
 						const document = await vscode.workspace.openTextDocument(uri);
 						const text = document.getText();
-						return { uri: document.uri, fingerprint: sourceFingerprint(text), entity: parseEntityModel(text, document.uri) };
+						return { uri: document.uri, fingerprint: sourceFingerprint(text), entities: parseEntityModels(text, document.uri) };
 					} catch {
 						return undefined;
 					}
@@ -116,8 +120,8 @@ export class WorkspaceEntityIndex {
 					}
 					const uriKey = result.uri.toString();
 					this.sourceFingerprints.set(uriKey, result.fingerprint);
-					if (result.entity) {
-						this.entitiesByUri.set(uriKey, result.entity);
+					if (result.entities.length > 0) {
+						this.entitiesByUri.set(uriKey, result.entities);
 					}
 				}
 			}
@@ -129,15 +133,17 @@ export class WorkspaceEntityIndex {
 
 	private rebuildNameIndex(): void {
 		this.entitiesByName.clear();
-		for (const entity of this.entitiesByUri.values()) {
-			const key = entity.name.toLowerCase();
-			this.entitiesByName.set(key, [...(this.entitiesByName.get(key) ?? []), entity]);
+		for (const entities of this.entitiesByUri.values()) {
+			for (const entity of entities) {
+				const key = entity.name.toLowerCase();
+				this.entitiesByName.set(key, [...(this.entitiesByName.get(key) ?? []), entity]);
+			}
 		}
 	}
 }
 
 export function parseEntity(text: string, uri: vscode.Uri): EntityInfo | undefined {
-	return parseEntityModel(text, uri);
+	return parseEntityModels(text, uri)[0];
 }
 
 export function extractRepositoryEntityNames(text: string): string[] {
@@ -190,17 +196,22 @@ export async function discoverEntities(currentDocument: vscode.TextDocument): Pr
 	const index = WorkspaceEntityIndex.getInstance();
 	await index.ensureInitialized();
 
-	const currentEntity = index.updateDocument(currentDocument);
+	index.updateDocument(currentDocument);
+	const currentEntities = index.getEntitiesForUri(currentDocument.uri);
 	const all = index.getAllEntities();
-	if (!currentEntity) {
+	if (currentEntities.length === 0) {
 		return all;
 	}
 	const otherEntities = all.filter((e) => e.uri.toString() !== currentDocument.uri.toString());
-	return [currentEntity, ...otherEntities];
+	return [...currentEntities, ...otherEntities];
 }
 
 export function clearEntityCache(): void {
 	WorkspaceEntityIndex.getInstance().clear();
+}
+
+export function parseEntities(text: string, uri: vscode.Uri): EntityInfo[] {
+	return parseEntityModels(text, uri);
 }
 
 /**

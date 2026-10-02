@@ -1,8 +1,8 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
-import { parseEntityModel } from '../entityModel';
-import { parseEntityModelAst } from '../javaAstParser';
+import { parseEntityModel, parseEntityModels } from '../entityModel';
+import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
 import { createKeywordItem, extractMethodParameterNames, shouldDisplayDiagnostic } from '../extension';
@@ -199,6 +199,24 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(entity.properties.find((property) => property.name === 'team')?.targetEntity, 'com.example.Team');
 		assert.strictEqual(entity.properties.find((property) => property.name === 'team')?.columnName, 'team_id');
 		assert.strictEqual(entity.properties.find((property) => property.name === 'tags')?.type, 'Map<String, List<Long>>');
+	});
+
+	test('extracts and indexes multiple top-level JPA types from one Java file', () => {
+		const uri = vscode.Uri.parse('file:///models/Types.java');
+		const source = 'package models; @Entity class User { String email; } @Embeddable class Address { String city; }';
+		const parsed = parseEntityModelsAst(source, uri);
+		assert.deepStrictEqual(parsed.map((entity) => entity.name), ['User', 'Address']);
+		assert.strictEqual(parsed[0].isEntity, true);
+		assert.strictEqual(parsed[1].isEntity, undefined);
+		assert.strictEqual(parseEntityModelAst(source, uri)?.name, 'User');
+		assert.deepStrictEqual(parseEntityModels(source, uri).map((entity) => entity.name), ['User', 'Address']);
+
+		const index = new WorkspaceEntityIndex();
+		const document = { languageId: 'java', uri, getText: () => source } as vscode.TextDocument;
+		index.updateDocument(document);
+		assert.deepStrictEqual(index.getAllEntities().map((entity) => entity.name), ['User', 'Address']);
+		index.removeUri(uri);
+		assert.strictEqual(index.getAllEntities().length, 0);
 	});
 
 	test('falls back to the base parser for incomplete Java source', () => {
@@ -415,6 +433,29 @@ suite('Extension Test Suite', () => {
 
 		assert.strictEqual(diags.length, 1);
 		assert.strictEqual(diags[0].code, 'MISSING_PAGEABLE');
+	});
+
+	test('flags a derived query returning a different known entity while accepting projections', () => {
+		const signature = {
+			rawText: 'java.util.List<com.example.Order> findByEmail(String email);',
+			returnType: 'java.util.List<com.example.Order>',
+			methodName: 'findByEmail',
+			entityName: 'User',
+			knownEntityNames: ['User', 'Order'],
+			parameters: [{ name: 'email', type: 'String' }],
+			startOffset: 0,
+			endOffset: 51,
+		};
+		const wrongEntity = validateDerivedMethodSignature(signature, [{ name: 'email', type: 'String' }]);
+		assert.strictEqual(wrongEntity.find((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE')?.expectedReturnType, 'java.util.List<User>');
+
+		const projection = validateDerivedMethodSignature({
+			...signature,
+			rawText: 'List<UserView> findByEmail(String email);',
+			returnType: 'List<UserView>',
+			knownEntityNames: ['User', 'Order'],
+		}, [{ name: 'email', type: 'String' }]);
+		assert.strictEqual(projection.some((diagnostic) => diagnostic.code === 'INVALID_RETURN_TYPE'), false);
 	});
 
 	test('flags extra parameters and unknown OrderBy properties', () => {
@@ -714,6 +755,31 @@ suite('Extension Test Suite', () => {
 		const position = new vscode.Position(0, text.indexOf('?') + 1);
 		const completions = createJpqlCompletions(document, position, [user]);
 		assert.deepStrictEqual(completions?.map((item) => item.label), ['?1']);
+	});
+
+	test('completes JPQL entities and parameters across text-block lines', () => {
+		const text = 'interface UserRepository {\n'
+			+ '  @Query("""\n'
+			+ '    SELECT u\n'
+			+ '    FROM Us\n'
+			+ '    WHERE u.email = :em\n'
+			+ '    """)\n'
+			+ '  List<User> findByEmail(String email);\n'
+			+ '}';
+		const lines = text.split('\n');
+		const document = {
+			getText: () => text,
+			lineAt: (line: number) => ({ text: lines[line] }),
+			offsetAt: (position: vscode.Position) => lines.slice(0, position.line).reduce((sum, line) => sum + line.length + 1, 0) + position.character,
+		} as any;
+		const entity = parseEntityModel('@Entity class User { String email; }', vscode.Uri.parse('file:///User.java'))!;
+		const entityPosition = new vscode.Position(3, lines[3].length);
+		const entityCompletions = createJpqlCompletions(document, entityPosition, [entity]);
+		assert.ok(entityCompletions?.some((item) => item.label === 'User'));
+
+		const parameterPosition = new vscode.Position(4, lines[4].length);
+		const parameterCompletions = createJpqlCompletions(document, parameterPosition, [entity]);
+		assert.ok(parameterCompletions?.some((item) => item.label === 'email'));
 	});
 
 	test('completes discovered DTOs after JPQL SELECT NEW', () => {

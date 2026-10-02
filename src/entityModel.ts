@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { maskJavaSource, parseJavaParameter, splitTopLevelParameters } from './javaParsing';
-import { parseEntityModelAst } from './javaAstParser';
+import { parseEntityModelsAst } from './javaAstParser';
 
 export interface PropertyLocation {
 	readonly line: number;
@@ -28,6 +28,7 @@ export interface EntityInfo {
 	readonly tableName?: string;
 	readonly packageName?: string;
 	readonly uri: vscode.Uri;
+	readonly isEntity?: boolean;
 	readonly isProjection?: boolean;
 	readonly superclassName?: string;
 	readonly isMappedSuperclass?: boolean;
@@ -45,15 +46,21 @@ const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 
 export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | undefined {
+	return parseEntityModels(text, uri)[0];
+}
+
+export function parseEntityModels(text: string, uri: vscode.Uri): EntityInfo[] {
 	try {
-		const astEntity = parseEntityModelAst(text, uri);
-		if (astEntity) {
-			return astEntity;
+		const astEntities = parseEntityModelsAst(text, uri);
+		if (astEntities.length > 0) {
+			return astEntities;
 		}
 	} catch {
-		return parseEntityModelLegacy(text, uri);
+		const legacyEntity = parseEntityModelLegacy(text, uri);
+		return legacyEntity ? [legacyEntity] : [];
 	}
-	return parseEntityModelLegacy(text, uri);
+	const legacyEntity = parseEntityModelLegacy(text, uri);
+	return legacyEntity ? [legacyEntity] : [];
 }
 
 function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | undefined {
@@ -89,6 +96,7 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 			name,
 			packageName,
 			uri,
+			...(isEntity ? { isEntity: true } : {}),
 			isMappedSuperclass,
 			isEmbeddable,
 			properties,
@@ -122,6 +130,7 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 		name,
 		packageName,
 		uri,
+		...(isEntity ? { isEntity: true } : {}),
 		superclassName,
 		isMappedSuperclass,
 		isEmbeddable,

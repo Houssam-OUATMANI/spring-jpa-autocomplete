@@ -6,6 +6,8 @@ export interface MethodSignatureInfo {
 	readonly rawText: string;
 	readonly returnType: string;
 	readonly methodName: string;
+	readonly entityName?: string;
+	readonly knownEntityNames?: readonly string[];
 	readonly parameters: readonly { name: string; type: string }[];
 	readonly startOffset: number;
 	readonly endOffset: number;
@@ -30,6 +32,9 @@ const PARAMETERLESS_OPERATORS = new Set([
 ]);
 
 const TWO_PARAMETER_OPERATORS = new Set(['Between']);
+const RETURN_TYPE_WRAPPERS = new Set([
+	'optional', 'list', 'set', 'collection', 'iterable', 'stream', 'page', 'slice', 'future', 'completablefuture',
+]);
 
 export function validateDerivedMethodSignature(
 	signature: MethodSignatureInfo,
@@ -76,10 +81,7 @@ export function validateDerivedMethodSignature(
 	}
 
 	// 2. Validate return type
-	const returnTypeDiag = validateReturnType(signature, parsed);
-	if (returnTypeDiag) {
-		diagnostics.push(returnTypeDiag);
-	}
+	diagnostics.push(...validateReturnType(signature, parsed));
 
 	// 3. Validate method parameters
 	const paramDiags = validateParameters(signature, parsed, propMap);
@@ -91,33 +93,49 @@ export function validateDerivedMethodSignature(
 function validateReturnType(
 	signature: MethodSignatureInfo,
 	parsed: ParsedDerivedMethod,
-): DerivedMethodValidationDiagnostic | undefined {
+): DerivedMethodValidationDiagnostic[] {
 	const ret = signature.returnType.trim();
 	const methodOffsetInSig = signature.rawText.indexOf(signature.methodName);
 	const retStart = signature.startOffset + signature.rawText.indexOf(ret);
 	const retEnd = retStart + ret.length;
+	const diagnostics: DerivedMethodValidationDiagnostic[] = [];
 
 	if (parsed.isExists) {
 		if (ret !== 'boolean' && ret !== 'Boolean') {
-			return {
+			diagnostics.push({
 				message: `'${parsed.rawMethodName}' must return boolean or Boolean, but returns '${ret}'.`,
 				severity: 'error',
 				startOffset: retStart,
 				endOffset: retEnd,
 				code: 'INVALID_RETURN_TYPE',
 				expectedReturnType: 'boolean',
-			};
+			});
 		}
 	} else if (parsed.isCount) {
 		if (!['long', 'Long', 'int', 'Integer'].includes(ret)) {
-			return {
+			diagnostics.push({
 				message: `'${parsed.rawMethodName}' must return a numeric count type (long or Long), but returns '${ret}'.`,
 				severity: 'error',
 				startOffset: retStart,
 				endOffset: retEnd,
 				code: 'INVALID_RETURN_TYPE',
 				expectedReturnType: 'long',
-			};
+			});
+		}
+	}
+
+	if (!parsed.isExists && !parsed.isCount && !parsed.isDelete && signature.entityName) {
+		const returnedEntity = findKnownEntityType(ret, signature.knownEntityNames ?? []);
+		if (returnedEntity && returnedEntity.toLowerCase() !== signature.entityName.toLowerCase()) {
+			const expectedReturnType = replaceEntityType(ret, returnedEntity, signature.entityName);
+			diagnostics.push({
+				message: `Derived query method '${parsed.rawMethodName}' belongs to entity '${signature.entityName}', but returns '${ret}'.`,
+				severity: 'error',
+				startOffset: retStart,
+				endOffset: retEnd,
+				code: 'INVALID_RETURN_TYPE',
+				expectedReturnType,
+			});
 		}
 	}
 
@@ -125,17 +143,41 @@ function validateReturnType(
 	if (ret.startsWith('Page<') || ret.startsWith('Page ')) {
 		const hasPageable = signature.parameters.some((p) => p.type.includes('Pageable'));
 		if (!hasPageable) {
-			return {
+			diagnostics.push({
 				message: `Repository method returning '${ret}' must declare a 'Pageable' parameter.`,
 				severity: 'warning',
 				startOffset: signature.startOffset + methodOffsetInSig,
 				endOffset: signature.startOffset + methodOffsetInSig + signature.methodName.length,
 				code: 'MISSING_PAGEABLE',
-			};
+			});
 		}
 	}
 
-	return undefined;
+	return diagnostics;
+}
+
+function findKnownEntityType(type: string, knownEntityNames: readonly string[]): string | undefined {
+	const normalized = type.replace(/\s+/g, '');
+	const genericStart = normalized.indexOf('<');
+	let returnedType = normalized;
+	if (genericStart >= 0) {
+		const wrapperName = normalized.slice(0, genericStart).split('.').at(-1)?.toLowerCase();
+		if (!wrapperName || !RETURN_TYPE_WRAPPERS.has(wrapperName) || !normalized.endsWith('>')) {
+			return undefined;
+		}
+		returnedType = normalized.slice(genericStart + 1, -1);
+		if (returnedType.includes('<') || returnedType.includes(',')) {
+			return undefined;
+		}
+	}
+	returnedType = returnedType.replace(/\[\]$/, '');
+	const simpleTypeName = returnedType.split('.').at(-1);
+	return knownEntityNames.find((name) => name.toLowerCase() === simpleTypeName?.toLowerCase());
+}
+
+function replaceEntityType(type: string, currentEntity: string, expectedEntity: string): string {
+	const escapedEntity = currentEntity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	return type.replace(new RegExp(`(?:[\\w$]+\\.)*${escapedEntity}\\b`), expectedEntity);
 }
 
 function validateParameters(
