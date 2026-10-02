@@ -1,15 +1,26 @@
 import * as vscode from 'vscode';
 import { EntityInfo } from '../entityModel';
 import { extractAllJpqlQueries, JpqlQueryInfo } from './jpqlParser';
+import { SqlDialect } from './sqlDialect';
 
-const SQL_KEYWORDS = [
+const COMMON_SQL_KEYWORDS = [
 	'SELECT', 'DISTINCT', 'FROM', 'WHERE', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'OUTER JOIN', 'ON',
 	'AND', 'OR', 'NOT', 'IN', 'IS NULL', 'IS NOT NULL', 'LIKE', 'BETWEEN', 'EXISTS', 'AS', 'GROUP BY', 'HAVING',
-	'ORDER BY', 'ASC', 'DESC', 'LIMIT', 'OFFSET', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'INSERT INTO', 'UPDATE',
+	'ORDER BY', 'ASC', 'DESC', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'INSERT INTO', 'UPDATE',
 	'SET', 'DELETE FROM', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'UNION', 'NULL', 'TRUE', 'FALSE',
 ];
 
-const SQL_RESERVED = new Set(SQL_KEYWORDS.flatMap((keyword) => keyword.toLowerCase().split(/\s+/)));
+const DIALECT_KEYWORDS: Record<SqlDialect, readonly string[]> = {
+	generic: ['OFFSET', 'FETCH FIRST'],
+	postgresql: ['LIMIT', 'OFFSET', 'RETURNING', 'ILIKE', 'DISTINCT ON', 'ON CONFLICT', 'JSONB'],
+	mysql: ['LIMIT', 'OFFSET', 'INSERT IGNORE', 'REPLACE INTO', 'ON DUPLICATE KEY UPDATE', 'AUTO_INCREMENT', 'IFNULL'],
+	mariadb: ['LIMIT', 'OFFSET', 'INSERT IGNORE', 'REPLACE INTO', 'ON DUPLICATE KEY UPDATE', 'AUTO_INCREMENT', 'IFNULL', 'RETURNING'],
+	sqlserver: ['TOP', 'OFFSET', 'FETCH NEXT', 'OUTPUT', 'ISNULL', 'NVARCHAR', 'IDENTITY'],
+	oracle: ['FETCH FIRST', 'FETCH NEXT', 'ROWNUM', 'NVL', 'SYSDATE', 'DUAL', 'RETURNING INTO'],
+	h2: ['LIMIT', 'OFFSET', 'FETCH FIRST', 'IDENTITY'],
+};
+
+const SQL_RESERVED = new Set([...COMMON_SQL_KEYWORDS, ...Object.values(DIALECT_KEYWORDS).flat()].flatMap((keyword) => keyword.toLowerCase().split(/\s+/)));
 
 interface SqlSuggestion {
 	readonly label: string;
@@ -22,6 +33,7 @@ export function createNativeSqlCompletions(
 	position: vscode.Position,
 	entities: readonly EntityInfo[],
 	queries?: readonly JpqlQueryInfo[],
+	dialect: SqlDialect = 'generic',
 ): vscode.CompletionItem[] | undefined {
 	const documentText = document.getText();
 	const documentOffset = document.offsetAt(position);
@@ -38,7 +50,10 @@ export function createNativeSqlCompletions(
 	const queryOffset = query.sourceOffsets.findIndex((sourceOffset) => sourceOffset >= documentOffset);
 	const cursorOffset = queryOffset < 0 ? query.queryContent.length : queryOffset;
 	const beforeCursor = query.queryContent.slice(0, cursorOffset);
-	const partial = beforeCursor.match(/[A-Za-z_$][\w$]*$/)?.[0] ?? '';
+	const partial = beforeCursor.endsWith('.')
+		? ''
+		: beforeCursor.match(/[A-Za-z_$][\w$]*$/)?.[0] ?? '';
+	const sqlKeywords = [...COMMON_SQL_KEYWORDS, ...DIALECT_KEYWORDS[dialect]];
 	const replacementRange = new vscode.Range(
 		new vscode.Position(position.line, position.character - partial.length),
 		position,
@@ -63,7 +78,7 @@ export function createNativeSqlCompletions(
 		}));
 	} else {
 		suggestions = [
-			...SQL_KEYWORDS.map((label) => ({ label, detail: 'SQL keyword', kind: vscode.CompletionItemKind.Keyword })),
+			...sqlKeywords.map((label) => ({ label, detail: `${dialect} SQL keyword`, kind: vscode.CompletionItemKind.Keyword })),
 			...entities.flatMap((entity) => entity.properties.map((property) => ({
 				label: property.columnName ?? property.name,
 				detail: `${entity.name}.${property.name}: ${property.type}`,

@@ -53,6 +53,10 @@
       {
         "command": "springJpa.generateRepositoryMethod",
         "title": "Spring JPA: Generate Repository Method"
+      },
+      {
+        "command": "springJpa.selectSqlDialect",
+        "title": "Spring JPA: Select SQL Dialect"
       }
     ],
     "grammars": [
@@ -86,6 +90,21 @@
           "type": "boolean",
           "default": true,
           "description": "Include Java test sources when building the entity index."
+        },
+        "springJpa.sqlDialect": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "generic",
+            "postgresql",
+            "mysql",
+            "mariadb",
+            "sqlserver",
+            "oracle",
+            "h2"
+          ],
+          "default": "auto",
+          "description": "SQL dialect for native query completions. Auto detects Spring/Hibernate settings or the JDBC URL."
         },
         "springJpa.enableCodeLens": {
           "type": "boolean",

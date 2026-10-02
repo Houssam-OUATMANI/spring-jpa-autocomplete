@@ -19,6 +19,7 @@ import { JPQL_FUNCTIONS, JPQL_KEYWORDS } from '../jpql/jpqlLanguage';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 import { createJpqlCompletions } from '../jpql/jpqlCompletion';
 import { maskJavaSource } from '../javaParsing';
+import { detectSqlDialect, resolveSqlDialect, setDocumentSqlDialect } from '../jpql/sqlDialect';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -828,6 +829,33 @@ suite('Extension Test Suite', () => {
 		const position = new vscode.Position(0, text.indexOf('account"') + 'account'.length);
 		const completions = createJpqlCompletions(document, position, [entity]);
 		assert.ok(completions?.some((item) => item.label === 'account_records'));
+	});
+
+	test('offers dialect-specific native SQL keywords without changing JPQL', () => {
+		const text = '@Query(value = "SELECT re FROM record_entries re WHERE re.", nativeQuery = true) List<RecordEntry> findAll();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const position = new vscode.Position(0, text.indexOf('re."') + 3);
+		const completions = createJpqlCompletions(document, position, [], 'postgresql');
+		assert.ok(completions?.some((item) => item.label === 'ILIKE'));
+		assert.ok(completions?.some((item) => item.label === 'RETURNING'));
+	});
+
+	test('detects common SQL dialects from Spring settings and JDBC URLs', () => {
+		assert.strictEqual(detectSqlDialect(['spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect']), 'postgresql');
+		assert.strictEqual(detectSqlDialect(['spring.datasource.url=jdbc:sqlserver://localhost:1433/db']), 'sqlserver');
+		assert.strictEqual(detectSqlDialect(['spring.datasource.url=jdbc:mariadb://localhost/db']), 'mariadb');
+		assert.strictEqual(detectSqlDialect(['spring.datasource.url=jdbc:unknown://localhost/db']), undefined);
+	});
+
+	test('uses a document override before the workspace SQL dialect', async () => {
+		const document = { uri: vscode.Uri.parse('file:///UserRepository.java') } as vscode.TextDocument;
+		setDocumentSqlDialect(document, 'postgresql');
+		assert.strictEqual(await resolveSqlDialect(document), 'postgresql');
+		setDocumentSqlDialect(document, undefined);
 	});
 
 	test('prioritizes derived property suggestions over operators', () => {

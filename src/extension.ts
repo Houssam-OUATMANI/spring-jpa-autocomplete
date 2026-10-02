@@ -13,6 +13,7 @@ import { SpringJpaCodeLensProvider } from './navigation/codeLensProvider';
 import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
 import { parseJavaParameters } from './javaParsing';
+import { resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -44,6 +45,31 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	context.subscriptions.push(rebuildIndex);
+
+	const selectSqlDialect = vscode.commands.registerCommand('springJpa.selectSqlDialect', async () => {
+		const configuration = vscode.workspace.getConfiguration('springJpa');
+		const currentDocument = vscode.window.activeTextEditor?.document;
+		const currentDialect = currentDocument ? await resolveSqlDialect(currentDocument) : configuration.get<SqlDialectSetting>('sqlDialect', 'auto');
+		const selected = await vscode.window.showQuickPick(
+			[
+				{ label: 'Workspace default', value: 'workspace' },
+				...SQL_DIALECT_OPTIONS.map((option) => ({ label: option.label, value: option.value })),
+			],
+			{ placeHolder: currentDocument ? `Current dialect: ${currentDialect}` : 'Choose the SQL dialect for this workspace', title: 'Spring JPA: SQL dialect' },
+		);
+		if (!selected) {
+			return;
+		}
+		if (currentDocument && selected.value !== 'workspace') {
+			const dialect = selected.value as SqlDialectSetting;
+			setDocumentSqlDialect(currentDocument, dialect);
+			vscode.window.showInformationMessage(`SQL dialect set to ${selected.label} for the current file.`);
+			return;
+		}
+		await configuration.update('sqlDialect', selected.value === 'workspace' ? 'auto' : selected.value, vscode.ConfigurationTarget.Workspace);
+		vscode.window.showInformationMessage(`Workspace SQL dialect set to ${selected.label === 'Workspace default' ? 'Auto-detect' : selected.label}.`);
+	});
+	context.subscriptions.push(selectSqlDialect);
 
 	const generateMethod = vscode.commands.registerCommand('springJpa.generateRepositoryMethod', async () => {
 		const editor = vscode.window.activeTextEditor;
@@ -214,7 +240,8 @@ export function activate(context: vscode.ExtensionContext) {
 				const entities = await discoverEntities(document);
 
 				// A. JPQL Completion inside @Query
-				const jpqlItems = createJpqlCompletions(document, position, entities);
+				const sqlDialect = await resolveSqlDialect(document);
+				const jpqlItems = createJpqlCompletions(document, position, entities, sqlDialect);
 				if (jpqlItems && jpqlItems.length > 0) {
 					return jpqlItems;
 				}

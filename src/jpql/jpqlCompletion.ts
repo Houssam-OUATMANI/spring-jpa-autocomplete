@@ -4,11 +4,13 @@ import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy, reso
 import { extractAllJpqlQueries } from './jpqlParser';
 import { JPQL_KEYWORDS } from './jpqlLanguage';
 import { createNativeSqlCompletions } from './nativeSqlCompletion';
+import { SqlDialect } from './sqlDialect';
 
 export function createJpqlCompletions(
 	document: vscode.TextDocument,
 	position: vscode.Position,
 	entities: readonly EntityInfo[],
+	sqlDialect: SqlDialect = 'generic',
 ): vscode.CompletionItem[] | undefined {
 	const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
 
@@ -22,7 +24,7 @@ export function createJpqlCompletions(
 		(q) => offset >= q.queryStartOffset && offset <= q.queryEndOffset,
 	);
 	if (activeQuery?.isNative) {
-		return createNativeSqlCompletions(document, position, entities, queries);
+		return createNativeSqlCompletions(document, position, entities, queries, sqlDialect);
 	}
 
 	if (!activeQuery) {
