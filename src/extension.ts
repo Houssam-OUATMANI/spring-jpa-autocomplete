@@ -26,9 +26,13 @@ export function shouldDisplayDiagnostic(mode: DiagnosticDisplayMode, severity: '
 	return mode === 'all' || (mode === 'errors' && severity === 'error') || (mode === 'warnings' && severity === 'warning');
 }
 
+export function hasJpaDiagnosticTargets(text: string): boolean {
+	return /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</.test(text)
+		|| /@(Query|NativeQuery)\s*\(/.test(text);
+}
+
 export function activate(context: vscode.ExtensionContext) {
 	const entityIndex = WorkspaceEntityIndex.getInstance();
-	void entityIndex.ensureInitialized();
 	const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
@@ -325,19 +329,30 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const started = Date.now();
-		const entities = await discoverEntities(document);
 		const documentDiagnostics: vscode.Diagnostic[] = [];
 		const docText = document.getText();
 		const derivedMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.derivedQueries', 'all');
 		const jpqlMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.jpql', 'all');
 
 		// Check if current file is a repository interface
-		const isRepo = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
+		const isRepo = derivedMode !== 'off'
+			&& /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
+		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
+		if (!isRepo && !hasJpqlQueries) {
+			diagnostics.set(document.uri, documentDiagnostics);
+			return;
+		}
+
+		const entities = await discoverEntities(document);
 
 		if (isRepo) {
 			// A. Derived Query Methods Diagnostics (Validation of signature, return types, parameters, properties)
 			const methodRegex = /\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*(?:throws\s+[\w$.,\s]+)?;/g;
 			let methodMatch: RegExpExecArray | null;
+			const knownEntityNames = entities
+				.filter((entity) => entity.isEntity)
+				.flatMap((entity) => [entity.name, entity.entityName].filter((name): name is string => Boolean(name)));
+			const propertiesByEntity = new Map<string | undefined, ReturnType<typeof findEntityProperties>>();
 
 			while ((methodMatch = methodRegex.exec(docText)) !== null) {
 				const fullText = methodMatch[0];
@@ -348,16 +363,18 @@ export function activate(context: vscode.ExtensionContext) {
 				const endOffset = methodMatch.index + fullText.length;
 				const repositoryEntityName = extractRepositoryEntityNameAt(docText, startOffset);
 
-				const properties = findEntityProperties(docText, entities, repositoryEntityName);
+				let properties = propertiesByEntity.get(repositoryEntityName);
+				if (!properties) {
+					properties = findEntityProperties(docText, entities, repositoryEntityName);
+					propertiesByEntity.set(repositoryEntityName, properties);
+				}
 				const parameters = parseMethodParameters(paramsText);
 				const sig: MethodSignatureInfo = {
 					rawText: fullText,
 					returnType,
 					methodName,
 					entityName: repositoryEntityName,
-					knownEntityNames: entities
-						.filter((entity) => entity.isEntity)
-						.flatMap((entity) => [entity.name, entity.entityName].filter((name): name is string => Boolean(name))),
+					knownEntityNames,
 					parameters,
 					startOffset,
 					endOffset,
@@ -394,20 +411,22 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		// B. JPQL Query Diagnostics (@Query annotations, multi-line, text blocks, aliases, params)
-		const jpqlQueries = extractAllJpqlQueries(docText, entities);
-		for (const q of jpqlQueries) {
-			const jpqlDiags = validateJpql(q, entities);
-			for (const d of jpqlDiags) {
-				if (!shouldDisplayDiagnostic(jpqlMode, d.severity)) {
-					continue;
+		if (hasJpqlQueries) {
+			const jpqlQueries = extractAllJpqlQueries(docText, entities);
+			for (const q of jpqlQueries) {
+				const jpqlDiags = validateJpql(q, entities);
+				for (const d of jpqlDiags) {
+					if (!shouldDisplayDiagnostic(jpqlMode, d.severity)) {
+						continue;
+					}
+					const start = document.positionAt(d.startOffset);
+					const end = document.positionAt(d.endOffset);
+					const severity = d.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
+					const diagnostic = new vscode.Diagnostic(new vscode.Range(start, end), d.message, severity);
+					diagnostic.source = 'spring-jpa';
+					diagnostic.code = d.code;
+					documentDiagnostics.push(diagnostic);
 				}
-				const start = document.positionAt(d.startOffset);
-				const end = document.positionAt(d.endOffset);
-				const severity = d.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
-				const diagnostic = new vscode.Diagnostic(new vscode.Range(start, end), d.message, severity);
-				diagnostic.source = 'spring-jpa';
-				diagnostic.code = d.code;
-				documentDiagnostics.push(diagnostic);
 			}
 		}
 
@@ -434,7 +453,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const scheduleWorkspaceJavaDiagnostics = () => {
 		for (const document of vscode.workspace.textDocuments) {
-			if (document.languageId === 'java') {
+			if (document.languageId === 'java' && hasJpaDiagnosticTargets(document.getText())) {
 				scheduleJavaDiagnostics(document);
 			}
 		}

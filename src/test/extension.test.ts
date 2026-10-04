@@ -5,7 +5,7 @@ import { parseEntityModel, parseEntityModels } from '../entityModel';
 import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
-import { createKeywordItem, extractMethodParameterNames, shouldDisplayDiagnostic } from '../extension';
+import { createKeywordItem, extractMethodParameterNames, hasJpaDiagnosticTargets, shouldDisplayDiagnostic } from '../extension';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 import { validateDerivedMethodSignature } from '../derivedQuery/queryValidator';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
@@ -68,6 +68,12 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(shouldDisplayDiagnostic('errors', 'warning'), false);
 		assert.strictEqual(shouldDisplayDiagnostic('warnings', 'warning'), true);
 		assert.strictEqual(shouldDisplayDiagnostic('off', 'error'), false);
+	});
+
+	test('identifies files that can contain Spring JPA diagnostics', () => {
+		assert.strictEqual(hasJpaDiagnosticTargets('interface UserRepository extends JpaRepository<User, Long> {}'), true);
+		assert.strictEqual(hasJpaDiagnosticTargets('@Query("select u from User u")'), true);
+		assert.strictEqual(hasJpaDiagnosticTargets('class UserService { void run() {} }'), false);
 	});
 
 	// ==========================================
