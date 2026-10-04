@@ -4,7 +4,7 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [1.0.0] - In progress
+## [1.0.0] - 2026-10-04
 
 ### Added
 
@@ -21,6 +21,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 - Kept the generic SQL fallback for unsupported providers while preserving better dialect-specific keyword suggestions when a dialect is known.
 - Preserved DTO and projection return types when their type is not known as a different JPA entity.
 - Made JPQL entity and named-parameter completions use the query context across text-block lines.
+- Reduced unnecessary workspace-wide diagnostics work and deferred entity indexing until it is needed.
 
 ## [0.9.9] - 2026-10-02
 

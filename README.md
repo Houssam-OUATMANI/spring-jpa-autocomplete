@@ -1,10 +1,8 @@
 # Spring Data JPA Tools
 
-**Version 1.0.0 (upcoming)** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
+**Version 1.0.0** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 
 Write Spring Data JPA repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and entity models.
-
-> The next major release is currently in progress and not yet published to the Marketplace. The current released version remains 0.9.9.
 
 ## See It in Action
 
@@ -157,7 +155,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The latest release is `0.9.9`; the v1 roadmap is in progress and the release notes are tracked in [CHANGELOG.md](CHANGELOG.md).
+The latest release is `1.0.0`; see [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Requirements
 
