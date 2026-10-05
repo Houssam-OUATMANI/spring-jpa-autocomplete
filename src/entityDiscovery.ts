@@ -114,8 +114,9 @@ export class WorkspaceEntityIndex {
 				? '**/{node_modules,target,build,out,.gradle,.vscode-test}/**'
 				: '**/{node_modules,target,build,out,.gradle,.vscode-test,src/test}/**';
 			const files = await vscode.workspace.findFiles('**/*.java', excluded);
-			for (let offset = 0; offset < files.length; offset += 32) {
-				const batch = await Promise.all(files.slice(offset, offset + 32).map(async (uri) => {
+			await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			for (let offset = 0; offset < files.length; offset += 8) {
+				const batch = await Promise.all(files.slice(offset, offset + 8).map(async (uri) => {
 					try {
 						if (isExcludedJavaUri(uri, includeTestSources)) {
 							return undefined;
@@ -136,6 +137,9 @@ export class WorkspaceEntityIndex {
 					if (result.entities.length > 0) {
 						this.entitiesByUri.set(uriKey, result.entities);
 					}
+				}
+				if (offset + 8 < files.length) {
+					await new Promise<void>((resolve) => setTimeout(resolve, 0));
 				}
 			}
 		} finally {
@@ -220,8 +224,17 @@ export async function discoverEntities(currentDocument: vscode.TextDocument): Pr
 		return [];
 	}
 	await index.ensureInitialized();
+	return getIndexedEntities(currentDocument);
+}
 
-	index.updateDocument(currentDocument);
+export function getIndexedEntities(currentDocument: vscode.TextDocument): readonly EntityInfo[] {
+	const index = WorkspaceEntityIndex.getInstance();
+	const includeTestSources = typeof vscode.workspace.getConfiguration !== 'undefined'
+		? vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true)
+		: true;
+	if (isExcludedJavaUri(currentDocument.uri, includeTestSources)) {
+		return [];
+	}
 	const currentEntities = index.getEntitiesForUri(currentDocument.uri);
 	const all = index.getAllEntities();
 	if (currentEntities.length === 0) {

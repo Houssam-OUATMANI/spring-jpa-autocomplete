@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, getIndexedEntities, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel, parseEntityModels } from '../entityModel';
 import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
@@ -857,6 +857,23 @@ suite('Extension Test Suite', () => {
 		index.removeUri(vscode.Uri.parse('file:///two/User.java'));
 		assert.strictEqual(index.getAllEntities().length, 1);
 		assert.strictEqual(index.getAllEntities()[0].properties[0].name, 'first');
+		index.clear();
+	});
+
+	test('serves completion entities from the current index without waiting for initialization', () => {
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear();
+		index.updateDocument({
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///cached/User.java'),
+			getText: () => '@Entity class User { String email; }',
+		} as any);
+		const entities = getIndexedEntities({
+			languageId: 'java',
+			uri: vscode.Uri.parse('file:///cached/UserRepository.java'),
+			getText: () => 'interface UserRepository extends JpaRepository<User, Long> {}',
+		} as any);
+		assert.strictEqual(entities[0].name, 'User');
 		index.clear();
 	});
 

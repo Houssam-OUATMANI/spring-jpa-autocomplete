@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { clearEntityCache, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, isExcludedJavaUri, WorkspaceEntityIndex } from './entityDiscovery';
+import { discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, getIndexedEntities, isExcludedJavaUri, WorkspaceEntityIndex } from './entityDiscovery';
 import { isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from './jpaKeywords';
 import { createKeywordItem } from './legacyHelpers';
 import { createDerivedQueryCompletions } from './derivedQuery/queryCompletion';
@@ -37,6 +37,10 @@ export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
 	void showInstallationWelcome(context, output);
+	void entityIndex.ensureInitialized().catch((error: unknown) => {
+		const message = error instanceof Error ? error.message : String(error);
+		output.appendLine(`Could not initialize the Spring JPA entity index: ${message}`);
+	});
 	const isExcludedJavaDocument = (document: vscode.TextDocument) => isExcludedJavaUri(
 		document.uri,
 		vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true),
@@ -254,17 +258,22 @@ export function activate(context: vscode.ExtensionContext) {
 		{
 			async provideCompletionItems(document, position) {
 				const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
-				const sourcePrefix = document.getText().slice(0, document.offsetAt(position));
+				const docText = document.getText();
+				const offset = document.offsetAt(position);
+				const sourcePrefix = docText.slice(0, offset);
 				if (isRepositoryDeclarationHeader(sourcePrefix)) {
 					return undefined;
 				}
-				const entities = await discoverEntities(document);
+				const entities = getIndexedEntities(document);
 
 				// A. JPQL Completion inside @Query
-				const sqlDialect = await resolveSqlDialect(document);
-				const jpqlItems = createJpqlCompletions(document, position, entities, sqlDialect);
-				if (jpqlItems && jpqlItems.length > 0) {
-					return jpqlItems;
+				if (/@(?:Query|NativeQuery)\s*\(/.test(docText)) {
+					const hasNativeQuery = /@NativeQuery\b|nativeQuery\s*=\s*true/.test(docText);
+					const sqlDialect = hasNativeQuery ? await resolveSqlDialect(document, false) : 'generic';
+					const jpqlItems = createJpqlCompletions(document, position, entities, sqlDialect);
+					if (jpqlItems && jpqlItems.length > 0) {
+						return jpqlItems;
+					}
 				}
 
 				if (!isRepositoryMethodContext(sourcePrefix)) {
@@ -272,7 +281,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 
 				// B. Derived Query & Keyword Completion
-				const properties = findEntityProperties(document.getText(), entities, extractRepositoryEntityNameAt(document.getText(), document.offsetAt(position)));
+				const properties = findEntityProperties(docText, entities, extractRepositoryEntityNameAt(docText, offset));
 				const derivedItems = createDerivedQueryCompletions(linePrefix, properties, position);
 				if (derivedItems.length > 0) {
 					return derivedItems;
@@ -476,7 +485,17 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	};
 
-	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(refreshJavaDiagnostics));
+	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument((document) => {
+		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
+			return;
+		}
+		const wasIndexed = entityIndex.hasUri(document.uri);
+		entityIndex.updateDocument(document);
+		void refreshJavaDiagnostics(document);
+		if (wasIndexed || entityIndex.hasUri(document.uri)) {
+			scheduleWorkspaceJavaDiagnostics();
+		}
+	}));
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
 		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
 			return;
@@ -512,6 +531,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	for (const document of vscode.workspace.textDocuments) {
 		if (!isExcludedJavaDocument(document)) {
+			entityIndex.updateDocument(document);
 			void refreshJavaDiagnostics(document);
 		}
 	}

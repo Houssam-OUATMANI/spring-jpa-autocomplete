@@ -17,7 +17,7 @@ export type SqlDialect = Exclude<SqlDialectSetting, 'auto'>;
 const DIALECT_FILES = '**/{application.properties,application.yml,application.yaml,persistence.xml,hibernate.properties}';
 const DIALECT_FILES_EXCLUDE = '**/{target,build,out,.gradle,.vscode-test,node_modules}/**';
 const DETECTION_CACHE_MS = 10_000;
-const detectionCache = new Map<string, { expiresAt: number; result: Promise<SqlDialect | undefined> }>();
+const detectionCache = new Map<string, { expiresAt: number; result: Promise<SqlDialect | undefined>; resolved?: SqlDialect }>();
 const documentDialectOverrides = new Map<string, SqlDialectSetting>();
 
 export function setDocumentSqlDialect(document: vscode.TextDocument, dialect: SqlDialectSetting | undefined): void {
@@ -46,7 +46,7 @@ export function detectSqlDialect(contents: readonly string[]): SqlDialect | unde
 	return jdbcVendor ? dialectFromName(jdbcVendor) : undefined;
 }
 
-export async function resolveSqlDialect(document: vscode.TextDocument): Promise<SqlDialect> {
+export async function resolveSqlDialect(document: vscode.TextDocument, waitForDetection = true): Promise<SqlDialect> {
 	const documentOverride = documentDialectOverrides.get(document.uri.toString());
 	if (documentOverride && documentOverride !== 'auto') {
 		return documentOverride;
@@ -65,11 +65,24 @@ export async function resolveSqlDialect(document: vscode.TextDocument): Promise<
 	const cacheKey = workspaceFolder.uri.toString();
 	const cached = detectionCache.get(cacheKey);
 	if (cached && cached.expiresAt > Date.now()) {
+		if (!waitForDetection) {
+			return 'resolved' in cached ? cached.resolved ?? 'generic' : 'generic';
+		}
 		return (await cached.result) ?? 'generic';
 	}
 
 	const result = detectWorkspaceDialect(workspaceFolder);
-	detectionCache.set(cacheKey, { expiresAt: Date.now() + DETECTION_CACHE_MS, result });
+	const entry: { expiresAt: number; result: Promise<SqlDialect | undefined>; resolved?: SqlDialect } = {
+		expiresAt: Date.now() + DETECTION_CACHE_MS,
+		result,
+	};
+	detectionCache.set(cacheKey, entry);
+	if (!waitForDetection) {
+		void result.then((dialect) => {
+			entry.resolved = dialect ?? 'generic';
+		});
+		return 'generic';
+	}
 	return (await result) ?? 'generic';
 }
 
