@@ -88,6 +88,15 @@ suite('Extension Test Suite', () => {
 		assert.ok(entity?.properties[0].location !== undefined);
 	});
 
+	test('skips ordinary Java classes and keeps fully qualified JPA entity annotations', () => {
+		const uri = vscode.Uri.parse('file:///User.java');
+		assert.deepStrictEqual(parseEntityModels('class UserService { void run() {} }', uri), []);
+		assert.strictEqual(
+			parseEntityModel('@jakarta.persistence.Entity class User { private String email; }', uri)?.name,
+			'User',
+		);
+	});
+
 	test('ignores @Transient fields and transient keyword', () => {
 		const text = `
 			@Entity

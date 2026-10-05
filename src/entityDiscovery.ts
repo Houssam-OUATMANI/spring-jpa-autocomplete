@@ -101,8 +101,8 @@ export class WorkspaceEntityIndex {
 				? vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true)
 				: true;
 			const excluded = includeTestSources
-				? '**/{node_modules,target,build,out,.gradle}/**'
-				: '**/{node_modules,target,build,out,.gradle,src/test}/**';
+				? '**/{node_modules,target,build,out,.gradle,.vscode-test}/**'
+				: '**/{node_modules,target,build,out,.gradle,.vscode-test,src/test}/**';
 			const files = await vscode.workspace.findFiles('**/*.java', excluded);
 			for (let offset = 0; offset < files.length; offset += 32) {
 				const batch = await Promise.all(files.slice(offset, offset + 32).map(async (uri) => {

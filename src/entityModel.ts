@@ -44,12 +44,23 @@ const LOMBOK_DATA_OR_GETTER = /@(Data|Getter|Value)\b/;
 const RECORD_DECLARATION = /\brecord\s+([A-Z]\w*)\s*\(([\s\S]*?)\)/;
 const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A-Z]\w*))?/;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
+const ENTITY_MODEL_ANNOTATION = /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable)\b/;
+const RECORD_KEYWORD = /\brecord\b/;
+const PROJECTION_INTERFACE = /\binterface\s+\w+\b/;
+const PROJECTION_GETTER = /\b(?:get|is|has)[A-Z]\w*\s*\(/;
 
 export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | undefined {
 	return parseEntityModels(text, uri)[0];
 }
 
 export function parseEntityModels(text: string, uri: vscode.Uri): EntityInfo[] {
+	const hasEntityAnnotation = ENTITY_MODEL_ANNOTATION.test(text);
+	const hasRecord = RECORD_KEYWORD.test(text);
+	const hasProjection = PROJECTION_INTERFACE.test(text) && PROJECTION_GETTER.test(text);
+	if (!hasEntityAnnotation && !hasRecord && !hasProjection) {
+		return [];
+	}
+
 	try {
 		const astEntities = parseEntityModelsAst(text, uri);
 		if (astEntities.length > 0) {
