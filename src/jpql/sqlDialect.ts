@@ -15,7 +15,7 @@ export type SqlDialectSetting = typeof SQL_DIALECT_OPTIONS[number]['value'];
 export type SqlDialect = Exclude<SqlDialectSetting, 'auto'>;
 
 const DIALECT_FILES = '**/{application.properties,application.yml,application.yaml,persistence.xml,hibernate.properties}';
-const DIALECT_FILES_EXCLUDE = '**/{target,build,node_modules}/**';
+const DIALECT_FILES_EXCLUDE = '**/{target,build,out,.gradle,.vscode-test,node_modules}/**';
 const DETECTION_CACHE_MS = 10_000;
 const detectionCache = new Map<string, { expiresAt: number; result: Promise<SqlDialect | undefined> }>();
 const documentDialectOverrides = new Map<string, SqlDialectSetting>();

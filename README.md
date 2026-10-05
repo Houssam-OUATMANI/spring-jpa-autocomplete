@@ -133,7 +133,7 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 - **Index and performance controls**:
   - Run `Spring JPA: Rebuild Entity Index` after changing project structure.
   - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, `springJpa.includeTestSources`, and `springJpa.enableCodeLens` in VS Code settings.
-  - Indexing skips Java files without JPA entity annotations, records, or projection interfaces, and excludes generated build and VS Code test-cache directories.
+  - Indexing skips Java files without JPA entity annotations, records, or projection interfaces, and excludes generated build and VS Code test-cache directories consistently across initial scans, file changes, and diagnostics. Set `springJpa.includeTestSources` to `false` to exclude `src/test`.
   - Configure `springJpa.diagnostics.derivedQueries` and `springJpa.diagnostics.jpql` independently with `all`, `errors`, `warnings`, or `off`.
 - **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.
 - **Debounced diagnostics**: Java diagnostics are delayed briefly while typing to avoid repeated analysis.

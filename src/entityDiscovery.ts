@@ -5,6 +5,18 @@ export { EntityInfo, EntityProperty, PropertyLocation };
 
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
+const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set(['node_modules', 'target', 'build', 'out', '.gradle', '.vscode-test']);
+
+export function isExcludedJavaUri(uri: vscode.Uri, includeTestSources = true): boolean {
+	const segments = uri.path.split('/').filter(Boolean);
+	if (segments.some((segment) => ALWAYS_EXCLUDED_JAVA_DIRECTORIES.has(segment.toLowerCase()))) {
+		return true;
+	}
+	if (!includeTestSources) {
+		return segments.some((segment, index) => segment.toLowerCase() === 'src' && segments[index + 1]?.toLowerCase() === 'test');
+	}
+	return false;
+}
 
 function sourceFingerprint(text: string): string {
 	let hash = 2166136261;
@@ -48,7 +60,7 @@ export class WorkspaceEntityIndex {
 	}
 
 	public updateDocument(document: vscode.TextDocument): EntityInfo | undefined {
-		if (document.languageId !== 'java') {
+		if (document.languageId !== 'java' || isExcludedJavaUri(document.uri, this.includeTestSources())) {
 			return undefined;
 		}
 		const uriKey = document.uri.toString();
@@ -97,9 +109,7 @@ export class WorkspaceEntityIndex {
 
 	private async scanWorkspace(): Promise<void> {
 		try {
-			const includeTestSources = typeof vscode.workspace.getConfiguration !== 'undefined'
-				? vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true)
-				: true;
+			const includeTestSources = this.includeTestSources();
 			const excluded = includeTestSources
 				? '**/{node_modules,target,build,out,.gradle,.vscode-test}/**'
 				: '**/{node_modules,target,build,out,.gradle,.vscode-test,src/test}/**';
@@ -107,9 +117,12 @@ export class WorkspaceEntityIndex {
 			for (let offset = 0; offset < files.length; offset += 32) {
 				const batch = await Promise.all(files.slice(offset, offset + 32).map(async (uri) => {
 					try {
-						const document = await vscode.workspace.openTextDocument(uri);
-						const text = document.getText();
-						return { uri: document.uri, fingerprint: sourceFingerprint(text), entities: parseEntityModels(text, document.uri) };
+						if (isExcludedJavaUri(uri, includeTestSources)) {
+							return undefined;
+						}
+						const contents = await vscode.workspace.fs.readFile(uri);
+						const text = Buffer.from(contents).toString('utf8');
+						return { uri, fingerprint: sourceFingerprint(text), entities: parseEntityModels(text, uri) };
 					} catch {
 						return undefined;
 					}
@@ -129,6 +142,12 @@ export class WorkspaceEntityIndex {
 			this.rebuildNameIndex();
 			this.isInitialized = true;
 		}
+	}
+
+	private includeTestSources(): boolean {
+		return typeof vscode.workspace.getConfiguration !== 'undefined'
+			? vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true)
+			: true;
 	}
 
 	private rebuildNameIndex(): void {
@@ -194,6 +213,12 @@ export function createEntityLookup(
 
 export async function discoverEntities(currentDocument: vscode.TextDocument): Promise<readonly EntityInfo[]> {
 	const index = WorkspaceEntityIndex.getInstance();
+	const includeTestSources = typeof vscode.workspace.getConfiguration !== 'undefined'
+		? vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true)
+		: true;
+	if (isExcludedJavaUri(currentDocument.uri, includeTestSources)) {
+		return [];
+	}
 	await index.ensureInitialized();
 
 	index.updateDocument(currentDocument);

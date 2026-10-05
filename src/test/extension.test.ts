@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { parseEntityModel, parseEntityModels } from '../entityModel';
 import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
@@ -74,6 +74,14 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(hasJpaDiagnosticTargets('interface UserRepository extends JpaRepository<User, Long> {}'), true);
 		assert.strictEqual(hasJpaDiagnosticTargets('@Query("select u from User u")'), true);
 		assert.strictEqual(hasJpaDiagnosticTargets('class UserService { void run() {} }'), false);
+	});
+
+	test('applies Java source exclusions consistently', () => {
+		assert.strictEqual(isExcludedJavaUri(vscode.Uri.parse('file:///workspace/target/generated/User.java')), true);
+		assert.strictEqual(isExcludedJavaUri(vscode.Uri.parse('file:///workspace/.vscode-test/User.java')), true);
+		assert.strictEqual(isExcludedJavaUri(vscode.Uri.parse('file:///workspace/src/test/java/User.java')), false);
+		assert.strictEqual(isExcludedJavaUri(vscode.Uri.parse('file:///workspace/src/test/java/User.java'), false), true);
+		assert.strictEqual(isExcludedJavaUri(vscode.Uri.parse('file:///workspace/src/main/java/User.java'), false), false);
 	});
 
 	// ==========================================

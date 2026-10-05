@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { clearEntityCache, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, WorkspaceEntityIndex } from './entityDiscovery';
+import { clearEntityCache, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, isExcludedJavaUri, WorkspaceEntityIndex } from './entityDiscovery';
 import { isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from './jpaKeywords';
 import { createKeywordItem } from './legacyHelpers';
 import { createDerivedQueryCompletions } from './derivedQuery/queryCompletion';
@@ -37,13 +37,17 @@ export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
 	void showInstallationWelcome(context, output);
+	const isExcludedJavaDocument = (document: vscode.TextDocument) => isExcludedJavaUri(
+		document.uri,
+		vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true),
+	);
 
 	const rebuildIndex = vscode.commands.registerCommand('springJpa.rebuildIndex', async () => {
 		const started = Date.now();
 		entityIndex.clear();
 		await entityIndex.ensureInitialized();
 		for (const document of vscode.workspace.textDocuments) {
-			if (document.languageId === 'java') {
+			if (document.languageId === 'java' && !isExcludedJavaDocument(document)) {
 				await refreshJavaDiagnostics(document);
 			}
 		}
@@ -200,6 +204,9 @@ export function activate(context: vscode.ExtensionContext) {
 	// Incremental file watcher for Java files
 	const watcher = vscode.workspace.createFileSystemWatcher('**/*.java');
 	watcher.onDidChange(async (uri) => {
+		if (isExcludedJavaUri(uri, vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true))) {
+			return;
+		}
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
 			const wasIndexed = entityIndex.hasUri(uri);
@@ -213,6 +220,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	watcher.onDidCreate(async (uri) => {
+		if (isExcludedJavaUri(uri, vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true))) {
+			return;
+		}
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
 			const wasIndexed = entityIndex.hasUri(uri);
@@ -226,6 +236,9 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	});
 	watcher.onDidDelete((uri) => {
+		if (isExcludedJavaUri(uri, vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true))) {
+			return;
+		}
 		entityIndex.removeUri(uri);
 		diagnostics.delete(uri);
 		scheduleWorkspaceJavaDiagnostics();
@@ -325,6 +338,10 @@ export function activate(context: vscode.ExtensionContext) {
 	// 4. Diagnostics Refresh
 	const refreshJavaDiagnostics = async (document: vscode.TextDocument) => {
 		if (document.languageId !== 'java') {
+			return;
+		}
+		if (isExcludedJavaDocument(document)) {
+			diagnostics.delete(document.uri);
 			return;
 		}
 
@@ -437,7 +454,7 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	const scheduleJavaDiagnostics = (document: vscode.TextDocument) => {
-		if (document.languageId !== 'java') {
+		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
 			return;
 		}
 		const key = document.uri.toString();
@@ -453,7 +470,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const scheduleWorkspaceJavaDiagnostics = () => {
 		for (const document of vscode.workspace.textDocuments) {
-			if (document.languageId === 'java' && hasJpaDiagnosticTargets(document.getText())) {
+			if (document.languageId === 'java' && !isExcludedJavaDocument(document) && hasJpaDiagnosticTargets(document.getText())) {
 				scheduleJavaDiagnostics(document);
 			}
 		}
@@ -461,7 +478,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(refreshJavaDiagnostics));
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
-		if (document.languageId !== 'java') {
+		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
 			return;
 		}
 		const wasIndexed = entityIndex.hasUri(document.uri);
@@ -472,7 +489,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	}));
 	context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
-		if (document.languageId === 'java') {
+		if (document.languageId === 'java' && !isExcludedJavaDocument(document)) {
 			const wasIndexed = entityIndex.hasUri(document.uri);
 			entityIndex.updateDocument(document);
 			void refreshJavaDiagnostics(document);
@@ -485,6 +502,7 @@ export function activate(context: vscode.ExtensionContext) {
 		if (event.affectsConfiguration('springJpa')) {
 			if (event.affectsConfiguration('springJpa.includeTestSources')) {
 				entityIndex.clear();
+				diagnostics.clear();
 				void entityIndex.ensureInitialized().then(scheduleWorkspaceJavaDiagnostics);
 				return;
 			}
@@ -493,7 +511,9 @@ export function activate(context: vscode.ExtensionContext) {
 	}));
 
 	for (const document of vscode.workspace.textDocuments) {
-		void refreshJavaDiagnostics(document);
+		if (!isExcludedJavaDocument(document)) {
+			void refreshJavaDiagnostics(document);
+		}
 	}
 
 	context.subscriptions.push({
