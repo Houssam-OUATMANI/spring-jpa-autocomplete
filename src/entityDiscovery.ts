@@ -5,7 +5,10 @@ export { EntityInfo, EntityProperty, PropertyLocation };
 
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
-const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set(['node_modules', 'target', 'build', 'out', '.gradle', '.vscode-test']);
+const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set([
+	'node_modules', 'target', 'build', 'out', '.gradle', '.vscode-test',
+	'.git', '.idea', '.settings', '.vscode', 'bin', 'dist',
+]);
 
 export function isExcludedJavaUri(uri: vscode.Uri, includeTestSources = true): boolean {
 	const segments = uri.path.split('/').filter(Boolean);
@@ -111,35 +114,30 @@ export class WorkspaceEntityIndex {
 		try {
 			const includeTestSources = this.includeTestSources();
 			const excluded = includeTestSources
-				? '**/{node_modules,target,build,out,.gradle,.vscode-test}/**'
-				: '**/{node_modules,target,build,out,.gradle,.vscode-test,src/test}/**';
+				? '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist}/**'
+				: '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist,src/test}/**';
 			const files = await vscode.workspace.findFiles('**/*.java', excluded);
-			await new Promise<void>((resolve) => setTimeout(resolve, 0));
-			for (let offset = 0; offset < files.length; offset += 8) {
-				const batch = await Promise.all(files.slice(offset, offset + 8).map(async (uri) => {
-					try {
-						if (isExcludedJavaUri(uri, includeTestSources)) {
-							return undefined;
-						}
-						const contents = await vscode.workspace.fs.readFile(uri);
-						const text = Buffer.from(contents).toString('utf8');
-						return { uri, fingerprint: sourceFingerprint(text), entities: parseEntityModels(text, uri) };
-					} catch {
-						return undefined;
-					}
-				}));
-				for (const result of batch) {
-					if (!result) {
+			let lastYield = Date.now();
+			for (const uri of files) {
+				try {
+					if (isExcludedJavaUri(uri, includeTestSources)) {
 						continue;
 					}
-					const uriKey = result.uri.toString();
-					this.sourceFingerprints.set(uriKey, result.fingerprint);
-					if (result.entities.length > 0) {
-						this.entitiesByUri.set(uriKey, result.entities);
+					const contents = await vscode.workspace.fs.readFile(uri);
+					const text = Buffer.from(contents).toString('utf8');
+					const uriKey = uri.toString();
+					const fingerprint = sourceFingerprint(text);
+					this.sourceFingerprints.set(uriKey, fingerprint);
+					const entities = parseEntityModels(text, uri);
+					if (entities.length > 0) {
+						this.entitiesByUri.set(uriKey, entities);
 					}
+				} catch {
+					// ignore
 				}
-				if (offset + 8 < files.length) {
+				if (Date.now() - lastYield >= 15) {
 					await new Promise<void>((resolve) => setTimeout(resolve, 0));
+					lastYield = Date.now();
 				}
 			}
 		} finally {
@@ -413,8 +411,23 @@ export function resolveEntityPropertyPathWithOwner(
 	return resolved && owner ? { property: resolved, owner } : undefined;
 }
 
+const COMMON_NON_ENTITY_TYPES = new Set([
+	'string', 'long', 'integer', 'int', 'boolean', 'double', 'float', 'byte', 'short', 'char', 'character',
+	'bigdecimal', 'biginteger', 'uuid', 'date', 'localdate', 'localdatetime', 'localtime', 'instant',
+	'zoneddatetime', 'offsetdatetime', 'duration', 'list', 'set', 'collection', 'iterable', 'map',
+	'optional', 'page', 'slice', 'stream', 'void', 'object',
+]);
+
 function findEntityByName(entitiesByName: ReadonlyMap<string, EntityInfo>, name: string): EntityInfo | undefined {
-	return entitiesByName.get(name) ?? [...entitiesByName.values()].find((entity) => entity.name.toLowerCase() === name.toLowerCase());
+	const key = name.toLowerCase();
+	if (COMMON_NON_ENTITY_TYPES.has(key)) {
+		return undefined;
+	}
+	const direct = entitiesByName.get(key);
+	if (direct) {
+		return direct;
+	}
+	return entitiesByName.get(name);
 }
 
 function capitalize(value: string): string {

@@ -105,6 +105,30 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
+	test('skips classes with the word record in comments or variables without declaring a record', () => {
+		const uri = vscode.Uri.parse('file:///RecordService.java');
+		const code = `
+			// This service handles record processing
+			public class RecordService {
+				private int recordCount;
+				public void process() {
+					String record = "data";
+				}
+			}
+		`;
+		assert.deepStrictEqual(parseEntityModels(code, uri), []);
+	});
+
+	test('skips repository interfaces from being treated as projections', () => {
+		const uri = vscode.Uri.parse('file:///UserRepository.java');
+		const code = `
+			public interface UserRepository extends JpaRepository<User, Long> {
+				User getUserById(Long id);
+			}
+		`;
+		assert.deepStrictEqual(parseEntityModels(code, uri), []);
+	});
+
 	test('ignores @Transient fields and transient keyword', () => {
 		const text = `
 			@Entity
