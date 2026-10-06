@@ -1,6 +1,6 @@
 # Spring Data JPA Tools
 
-**Version 1.0.0** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
+**Version 1.0.2** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 
 Write Spring Data JPA repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and entity models.
 

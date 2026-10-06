@@ -4,6 +4,14 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.0.2] - 2026-10-07
+
+### Improved
+
+- Made entity discovery more reliable by skipping non-JPA classes, improving annotation detection, and handling repository interfaces and record classes.
+- Consistently excluded irrelevant Java files and directories from entity indexing and diagnostics.
+- Improved entity indexing and completion efficiency by reusing indexed entities and processing files in batches.
+
 ## [1.0.0] - 2026-10-04
 
 ### Added
