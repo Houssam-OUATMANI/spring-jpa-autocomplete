@@ -18,7 +18,7 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 		const lenses: vscode.CodeLens[] = [];
 
 		// 1. CodeLens on Repository interfaces: Link to Managed Entity
-		const repositoryMatch = docText.match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository)\s*<\s*([A-Z]\w*)/);
+		const repositoryMatch = docText.match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/);
 		if (repositoryMatch && repositoryMatch.index !== undefined) {
 			const entity = entityLookup.get(repositoryMatch[1].toLowerCase());
 			if (entity) {

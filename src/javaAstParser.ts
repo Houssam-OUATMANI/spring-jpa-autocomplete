@@ -108,10 +108,12 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): Enti
 			}
 		}
 
-		const isEntity = annotations.has('Entity');
+		const hasExplicitEntity = annotations.has('Entity');
 		const isMappedSuperclass = annotations.has('MappedSuperclass');
 		const isEmbeddable = annotations.has('Embeddable');
 		const isProjection = Boolean(normalInterface && properties.size > 0);
+		const hasJpaMarkers = annotations.has('Table') || [...properties.values()].some((p) => p.isId || p.relation !== undefined || p.columnName !== undefined);
+		const isEntity = hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !record && !isProjection && hasJpaMarkers);
 		if (!isEntity && !isMappedSuperclass && !isEmbeddable && !record && !isProjection) {
 			continue;
 		}
@@ -125,7 +127,7 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): Enti
 			tableName: annotationValue(typeAnnotations, 'Table', 'name'),
 			packageName,
 			uri,
-			...(isEntity ? { isEntity: true } : {}),
+			...(isEntity ? { isEntity: true, hasEntityAnnotation: hasExplicitEntity } : {}),
 			...(isFinal ? { isFinal: true } : {}),
 			isProjection: isProjection || undefined,
 			superclassName,

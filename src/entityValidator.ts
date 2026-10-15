@@ -8,7 +8,7 @@ export interface EntityDiagnostic {
 	readonly line: number;
 	readonly character: number;
 	readonly length: number;
-	readonly code: 'MISSING_ID_ANNOTATION' | 'INVALID_MAPPED_BY' | 'FINAL_ENTITY_CLASS' | 'EAGER_COLLECTION_FETCH';
+	readonly code: 'MISSING_ID_ANNOTATION' | 'INVALID_MAPPED_BY' | 'FINAL_ENTITY_CLASS' | 'EAGER_COLLECTION_FETCH' | 'MISSING_ENTITY_ANNOTATION';
 	readonly suggestedProperty?: string;
 }
 
@@ -21,6 +21,19 @@ export function validateJpaEntities(
 	const entityLookup = createEntityLookup(allEntities);
 
 	for (const entity of entities) {
+		// 0. Missing @Entity annotation check (when JPA mapping annotations are present on a class missing @Entity)
+		if (entity.isEntity && entity.hasEntityAnnotation === false && !entity.isMappedSuperclass && !entity.isEmbeddable && !entity.isProjection) {
+			const loc = entity.location ?? { line: 0, character: 0, length: entity.name.length };
+			diagnostics.push({
+				message: `Class '${entity.name}' has JPA mappings but is missing the '@Entity' annotation required by JPA.`,
+				severity: 'error',
+				line: loc.line,
+				character: loc.character,
+				length: loc.length,
+				code: 'MISSING_ENTITY_ANNOTATION',
+			});
+		}
+
 		// 1. Missing @Id check (only for genuine JPA entities)
 		if (entity.isEntity && !entity.isMappedSuperclass && !entity.isEmbeddable && !entity.isProjection) {
 			const resolved = resolveEntityHierarchy(entity, entityLookup);

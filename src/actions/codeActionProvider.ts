@@ -58,6 +58,22 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 				action.diagnostics = [diagnostic];
 				action.isPreferred = true;
 				actions.push(action);
+			} else if (code === 'MISSING_ENTITY_ANNOTATION') {
+				const entityName = diagnostic.message.match(/Class '([^']+)'/)?.[1] ?? 'class';
+				const action = new vscode.CodeAction(
+					`Add '@Entity' annotation to class '${entityName}'`,
+					vscode.CodeActionKind.QuickFix,
+				);
+				action.edit = new vscode.WorkspaceEdit();
+				const line = typeof document.lineAt === 'function' ? document.lineAt(diagnostic.range.start.line) : { text: '' };
+				const indent = line.text.match(/^\s*/)?.[0] ?? '';
+				action.edit.insert(document.uri, new vscode.Position(diagnostic.range.start.line, 0), `${indent}@Entity\n`);
+				const hasJakarta = /\bjakarta\.persistence\b/.test(document.getText());
+				const entityImport = hasJakarta ? 'jakarta.persistence.Entity' : 'javax.persistence.Entity';
+				addImportIfMissing(action.edit, document, entityImport);
+				action.diagnostics = [diagnostic];
+				action.isPreferred = true;
+				actions.push(action);
 			} else if (code === 'MISSING_PARAM_ANNOTATION') {
 				const match = diagnostic.message.match(/missing '@Param\("([^"]+)"\)'/);
 				if (match) {
@@ -230,6 +246,10 @@ function parseMissingParameters(message: string): { name: string; type: string }
 function addImportIfMissing(edit: vscode.WorkspaceEdit, document: vscode.TextDocument, importName: string): void {
 	const text = document.getText();
 	if (new RegExp(`\\bimport\\s+${importName.replace(/\./g, '\\.')}\\s*;`).test(text)) {
+		return;
+	}
+	const pkg = importName.slice(0, importName.lastIndexOf('.'));
+	if (new RegExp(`\\bimport\\s+${pkg.replace(/\./g, '\\.')}\\.\\*;`).test(text)) {
 		return;
 	}
 

@@ -1487,4 +1487,108 @@ suite('Extension Test Suite', () => {
 		assert.ok(entries.has(repoUri.toString()));
 		index.clear();
 	});
+
+	// ==========================================
+	// Tests: JPA annotations sans @Entity (cas Book)
+	// ==========================================
+	test('indexes class with @Id and @ManyToOne but without @Entity as an entity (resilient mode)', () => {
+		// Simule exactement la classe Book de l'utilisateur : @Getter @Setter mais PAS @Entity
+		const bookSrc = `
+package com.example;
+
+import jakarta.persistence.*;
+import java.math.BigDecimal;
+import java.util.UUID;
+
+@Getter @Setter @AllArgsConstructor @NoArgsConstructor @Builder
+public class Book {
+
+  @Id
+  @GeneratedValue(strategy = GenerationType.UUID)
+  private UUID id;
+  private String title;
+  private String author;
+  private BigDecimal price;
+  private String language;
+  private Integer pageCount;
+
+  @ManyToOne
+  @JoinColumn(name = "category_id")
+  private Category category;
+}`;
+		const uri = vscode.Uri.parse('file:///src/Book.java');
+		const entities = parseEntityModels(bookSrc, uri);
+		// Doit être indexé malgré l'absence de @Entity
+		assert.strictEqual(entities.length, 1, 'Book should be indexed');
+		const book = entities[0];
+		assert.strictEqual(book.name, 'Book');
+		assert.strictEqual(book.isEntity, true, 'isEntity should be true via JPA marker inference');
+		assert.strictEqual(book.hasEntityAnnotation, false, 'hasEntityAnnotation should be false (missing @Entity)');
+		// Les propriétés doivent être extraites
+		const propNames = book.properties.map((p) => p.name);
+		assert.ok(propNames.includes('price'), `price property must be indexed, got: ${propNames.join(',')}`);
+		assert.ok(propNames.includes('title'), 'title property must be indexed');
+		assert.ok(propNames.includes('category'), 'category (ManyToOne) property must be indexed');
+		// La propriété id doit être marquée comme @Id
+		const idProp = book.properties.find((p) => p.name === 'id');
+		assert.ok(idProp?.isId, 'id property must be flagged isId=true');
+	});
+
+	test('MISSING_ENTITY_ANNOTATION diagnostic is raised for Book without @Entity', () => {
+		const uri = vscode.Uri.parse('file:///src/Book.java');
+		const book = {
+			name: 'Book',
+			uri,
+			isEntity: true as const,
+			hasEntityAnnotation: false,
+			properties: [
+				{ name: 'id', type: 'UUID', isId: true as const },
+				{ name: 'price', type: 'BigDecimal' },
+			],
+			location: { line: 7, character: 13, length: 4 },
+		};
+		const diags = validateJpaEntities([book], [book], '@Id UUID id; BigDecimal price;');
+		const missing = diags.filter((d) => d.code === 'MISSING_ENTITY_ANNOTATION');
+		assert.strictEqual(missing.length, 1, 'Should have exactly one MISSING_ENTITY_ANNOTATION diagnostic');
+		assert.ok(missing[0].message.includes('Book'), 'Diagnostic message should name the class');
+		assert.strictEqual(missing[0].severity, 'error');
+	});
+
+	test('MISSING_ENTITY_ANNOTATION is NOT raised for class with @Entity', () => {
+		const uri = vscode.Uri.parse('file:///src/User.java');
+		const user = {
+			name: 'User',
+			uri,
+			isEntity: true as const,
+			hasEntityAnnotation: true,
+			properties: [{ name: 'id', type: 'Long', isId: true as const }],
+			location: { line: 2, character: 13, length: 4 },
+		};
+		const diags = validateJpaEntities([user], [user], '@Entity class User { @Id Long id; }');
+		const missing = diags.filter((d) => d.code === 'MISSING_ENTITY_ANNOTATION');
+		assert.strictEqual(missing.length, 0, 'No MISSING_ENTITY_ANNOTATION for properly annotated entity');
+	});
+
+	test('derived query findByPrice works on Book indexed without @Entity', () => {
+		const bookSrc = `
+package com.example;
+import jakarta.persistence.*;
+import java.math.BigDecimal;
+import java.util.UUID;
+@Getter @Setter
+public class Book {
+  @Id private UUID id;
+  private String title;
+  private BigDecimal price;
+  @ManyToOne @JoinColumn(name="category_id") private Category category;
+}`;
+		const uri = vscode.Uri.parse('file:///src/Book.java');
+		const entities = parseEntityModels(bookSrc, uri);
+		assert.strictEqual(entities.length, 1);
+		const repoText = 'interface BookRepository extends JpaRepository<Book, UUID> {}';
+		const properties = findEntityProperties(repoText, entities, 'Book');
+		const propNames = properties.map((p) => p.name);
+		assert.ok(propNames.includes('price'), `findByPrice should work — price must be in props: ${propNames.join(',')}`);
+		assert.ok(propNames.includes('title'), 'findByTitle should work');
+	});
 });

@@ -3,7 +3,7 @@ import { EntityInfo, EntityProperty, parseEntityModels, PropertyLocation } from 
 
 export { EntityInfo, EntityProperty, PropertyLocation };
 
-const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/g;
+const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set([
 	'node_modules', 'target', 'build', 'out', '.gradle', '.vscode-test',

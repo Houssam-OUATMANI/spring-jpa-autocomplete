@@ -31,6 +31,7 @@ export interface EntityInfo {
 	readonly packageName?: string;
 	readonly uri: vscode.Uri;
 	readonly isEntity?: boolean;
+	readonly hasEntityAnnotation?: boolean;
 	readonly isFinal?: boolean;
 	readonly isProjection?: boolean;
 	readonly superclassName?: string;
@@ -43,11 +44,12 @@ export interface EntityInfo {
 const ENTITY_ANNOTATION = /@Entity\b(?:\s*\([^)]*\))?/;
 const MAPPED_SUPERCLASS_ANNOTATION = /@MappedSuperclass\b/;
 const EMBEDDABLE_ANNOTATION = /@Embeddable\b/;
+const JPA_MAPPING_ANNOTATION = /@(?:[\w$]+\.)*(?:Table|Id|EmbeddedId|GeneratedValue|Column|JoinColumn|ManyToOne|OneToMany|ManyToMany|OneToOne)\b/;
 const LOMBOK_DATA_OR_GETTER = /@(Data|Getter|Value)\b/;
 const RECORD_DECLARATION = /\brecord\s+([A-Z]\w*)\s*\(([\s\S]*?)\)/;
 const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A-Z]\w*))?/;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
-const ENTITY_MODEL_ANNOTATION = /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable)\b/;
+const ENTITY_MODEL_ANNOTATION = /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId|GeneratedValue|Column|JoinColumn|ManyToOne|OneToMany|ManyToMany|OneToOne)\b/;
 const RECORD_DECLARATION_KEYWORD = /\brecord\s+[A-Z]\w*\s*[\(<]/;
 const REPOSITORY_INTERFACE = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</;
 const PROJECTION_INTERFACE = /\binterface\s+\w+\b/;
@@ -79,12 +81,14 @@ export function parseEntityModels(text: string, uri: vscode.Uri): EntityInfo[] {
 
 function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | undefined {
 	const maskedText = maskJavaSource(text);
-	const isEntity = ENTITY_ANNOTATION.test(maskedText);
+	const hasExplicitEntity = ENTITY_ANNOTATION.test(maskedText);
+	const hasJpaMarkers = JPA_MAPPING_ANNOTATION.test(maskedText);
 	const isMappedSuperclass = MAPPED_SUPERCLASS_ANNOTATION.test(maskedText);
 	const isEmbeddable = EMBEDDABLE_ANNOTATION.test(maskedText);
 	const recordMatch = maskedText.match(RECORD_DECLARATION);
 	const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
 	const projectionMatch = maskedText.match(/\binterface\s+([A-Z]\w*)\b[\s\S]*?\b(?:get|is|has)[A-Z]\w*\s*\(/);
+	const isEntity = hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch && hasJpaMarkers);
 
 	if (!isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch) {
 		return undefined;
@@ -110,7 +114,7 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 			name,
 			packageName,
 			uri,
-			...(isEntity ? { isEntity: true } : {}),
+			...(isEntity ? { isEntity: true, hasEntityAnnotation: hasExplicitEntity } : {}),
 			isMappedSuperclass,
 			isEmbeddable,
 			properties,
@@ -121,6 +125,8 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 		ENTITY_ANNOTATION.exec(maskedText)?.index,
 		MAPPED_SUPERCLASS_ANNOTATION.exec(maskedText)?.index,
 		EMBEDDABLE_ANNOTATION.exec(maskedText)?.index,
+		/@Table\b/.exec(maskedText)?.index,
+		/@Id\b/.exec(maskedText)?.index,
 	].filter((offset): offset is number => offset !== undefined).sort((left, right) => left - right)[0];
 	const classDeclarations = [...maskedText.matchAll(new RegExp(CLASS_DECLARATION.source, 'g'))];
 	const classMatch = entityAnnotationOffset === undefined
@@ -144,7 +150,7 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 		name,
 		packageName,
 		uri,
-		...(isEntity ? { isEntity: true } : {}),
+		...(isEntity ? { isEntity: true, hasEntityAnnotation: hasExplicitEntity } : {}),
 		superclassName,
 		isMappedSuperclass,
 		isEmbeddable,

@@ -394,7 +394,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const isRepo = derivedMode !== 'off'
 			&& /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
 		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
-		const hasEntities = derivedMode !== 'off' && /@Entity\b/.test(docText);
+		const hasEntities = derivedMode !== 'off' && /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId)\b/.test(docText);
 		if (!isRepo && !hasJpqlQueries && !hasEntities) {
 			diagnostics.set(document.uri, documentDiagnostics);
 			return;
