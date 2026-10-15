@@ -57,6 +57,14 @@
       {
         "command": "springJpa.selectSqlDialect",
         "title": "Spring JPA: Select SQL Dialect"
+      },
+      {
+        "command": "springJpa.openEntity",
+        "title": "Spring JPA: Open Managed Entity"
+      },
+      {
+        "command": "springJpa.openRepository",
+        "title": "Spring JPA: Open Spring Data Repository"
       }
     ],
     "grammars": [

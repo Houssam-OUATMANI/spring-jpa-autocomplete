@@ -20,6 +20,10 @@ import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 import { createJpqlCompletions } from '../jpql/jpqlCompletion';
 import { maskJavaSource } from '../javaParsing';
 import { detectSqlDialect, resolveSqlDialect, setDocumentSqlDialect } from '../jpql/sqlDialect';
+import { validateJpaEntities } from '../entityValidator';
+import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
+import { SpringJpaReferenceProvider } from '../navigation/referenceProvider';
+import { SpringJpaRenameProvider } from '../navigation/renameProvider';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -1210,5 +1214,277 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(item.insertText, 'existsBy');
 		assert.strictEqual(range.start.character, 3);
 		assert.strictEqual(range.end.character, 5);
+	});
+
+	// ==========================================
+	// 9. Inspections JPA & Modèle d'entités
+	// ==========================================
+	test('flags JPA entity missing @Id or @EmbeddedId', () => {
+		const entity = {
+			name: 'NoIdUser',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///NoIdUser.java'),
+			properties: [{ name: 'email', type: 'String' }],
+		} as any;
+		const diags = validateJpaEntities([entity], [entity], '@Entity class NoIdUser { String email; }');
+		assert.strictEqual(diags.length, 1);
+		assert.strictEqual(diags[0].code, 'MISSING_ID_ANNOTATION');
+	});
+
+	test('accepts JPA entity with @Id or @EmbeddedId or inherited from @MappedSuperclass', () => {
+		const baseEntity = {
+			name: 'BaseEntity',
+			isMappedSuperclass: true,
+			uri: vscode.Uri.parse('file:///BaseEntity.java'),
+			properties: [{ name: 'id', type: 'Long', isId: true }],
+		} as any;
+		const user = {
+			name: 'UserWithSuper',
+			isEntity: true,
+			superclassName: 'BaseEntity',
+			uri: vscode.Uri.parse('file:///UserWithSuper.java'),
+			properties: [{ name: 'email', type: 'String' }],
+		} as any;
+		const diags = validateJpaEntities([user], [baseEntity, user], '@Entity class UserWithSuper extends BaseEntity { String email; }');
+		assert.strictEqual(diags.length, 0);
+	});
+
+	test('flags invalid mappedBy referencing unknown attribute on target entity', () => {
+		const author = {
+			name: 'Author',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///Author.java'),
+			properties: [{ name: 'id', type: 'Long', isId: true }, { name: 'name', type: 'String' }],
+		} as any;
+		const book = {
+			name: 'Book',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///Book.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+				{ name: 'author', type: 'Author', relation: 'OneToMany', mappedBy: 'unknownField', targetEntity: 'Author' },
+			],
+		} as any;
+		const diags = validateJpaEntities([book], [author, book], '@Entity class Book { @OneToMany(mappedBy = "unknownField") Author author; }');
+		assert.strictEqual(diags.length, 1);
+		assert.strictEqual(diags[0].code, 'INVALID_MAPPED_BY');
+	});
+
+	test('flags final entity class as warning', () => {
+		const entity = {
+			name: 'FinalUser',
+			isEntity: true,
+			isFinal: true,
+			uri: vscode.Uri.parse('file:///FinalUser.java'),
+			properties: [{ name: 'id', type: 'Long', isId: true }],
+		} as any;
+		const diags = validateJpaEntities([entity], [entity], 'final @Entity class FinalUser { @Id Long id; }');
+		assert.strictEqual(diags.length, 1);
+		assert.strictEqual(diags[0].code, 'FINAL_ENTITY_CLASS');
+		assert.strictEqual(diags[0].severity, 'warning');
+	});
+
+	test('warns when FetchType.EAGER is used on collection relationships', () => {
+		const entity = {
+			name: 'Order',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///Order.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+				{ name: 'items', type: 'List<Item>', relation: 'OneToMany', fetchType: 'EAGER' },
+			],
+		} as any;
+		const diags = validateJpaEntities([entity], [entity], '@Entity class Order { @OneToMany(fetch = FetchType.EAGER) List<Item> items; }');
+		assert.strictEqual(diags.length, 1);
+		assert.strictEqual(diags[0].code, 'EAGER_COLLECTION_FETCH');
+	});
+
+	// ==========================================
+	// 10. Inspection @Modifying & requêtes UPDATE / DELETE
+	// ==========================================
+	test('flags UPDATE/DELETE queries missing @Modifying annotation', () => {
+		const queries = extractAllJpqlQueries('@Query("UPDATE User u SET u.active = false") int deactivateAll();', []);
+		assert.strictEqual(queries.length, 1);
+		assert.strictEqual(queries[0].isUpdateOrDelete, true);
+		assert.strictEqual(queries[0].isModifying, false);
+
+		const diags = validateJpql(queries[0], []);
+		const modifyingDiag = diags.find((d) => d.code === 'MISSING_MODIFYING_ANNOTATION');
+		assert.ok(modifyingDiag);
+	});
+
+	test('flags modifying queries returning non-numeric non-void types', () => {
+		const queries = extractAllJpqlQueries('@Modifying @Query("DELETE FROM User u WHERE u.active = false") User deleteInactive();', []);
+		assert.strictEqual(queries.length, 1);
+		assert.strictEqual(queries[0].isModifying, true);
+
+		const diags = validateJpql(queries[0], []);
+		const retDiag = diags.find((d) => d.code === 'INVALID_RETURN_TYPE');
+		assert.ok(retDiag);
+	});
+
+	test('accepts modifying queries with @Modifying and int/void return type', () => {
+		const queries = extractAllJpqlQueries('@Modifying @Query("UPDATE User u SET u.active = false") int deactivateAll();', []);
+		const diags = validateJpql(queries[0], []);
+		assert.strictEqual(diags.length, 0);
+	});
+
+	test('generates Quick-Fix to add @Modifying annotation', () => {
+		const provider = new SpringJpaCodeActionProvider();
+		const doc = {
+			uri: vscode.Uri.parse('file:///UserRepository.java'),
+			lineAt: () => ({ text: '@Query("UPDATE User u SET u.active = false")' }),
+			getText: () => 'interface UserRepository { @Query("UPDATE User u SET u.active = false") int deactivate(); }',
+		} as any;
+		const diagnostic = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 10)),
+			"Modifying query ('UPDATE' or 'DELETE') requires '@Modifying' annotation.",
+			vscode.DiagnosticSeverity.Error,
+		);
+		diagnostic.source = 'spring-jpa';
+		diagnostic.code = 'MISSING_MODIFYING_ANNOTATION';
+
+		const actions = provider.provideCodeActions(doc, diagnostic.range, { diagnostics: [diagnostic] } as any, {} as any);
+		assert.ok(actions.some((a) => a.title.includes("@Modifying")));
+	});
+
+	// ==========================================
+	// 11. Autoboxing dans les types de paramètres JPQL
+	// ==========================================
+	test('accepts primitive long for boxed Long entity property in JPQL parameter validation', () => {
+		const user = {
+			name: 'User',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///User.java'),
+			properties: [{ name: 'id', type: 'Long', isId: true }],
+		} as any;
+		const query = extractAllJpqlQueries('@Query("SELECT u FROM User u WHERE u.id = :id") Optional<User> findById(@Param("id") long id);', [user])[0];
+		assert.ok(query);
+		const diags = validateJpql(query, [user]);
+		assert.strictEqual(diags.filter((d) => d.code === 'INVALID_PARAMETER_TYPE').length, 0);
+	});
+
+	// ==========================================
+	// 12. Conversion Méthode Dérivée vers @Query JPQL
+	// ==========================================
+	test('converts complex derived query method to equivalent JPQL @Query', () => {
+		const result = convertDerivedQueryToJpql({
+			rawText: 'List<User> findByEmailAndActiveOrderByCreatedAtDesc(String email, boolean active);',
+			methodName: 'findByEmailAndActiveOrderByCreatedAtDesc',
+			returnType: 'List<User>',
+			entityName: 'User',
+			parameters: [{ name: 'email', type: 'String' }, { name: 'active', type: 'boolean' }],
+			startOffset: 0,
+			endOffset: 80,
+		}, 'User');
+
+		assert.ok(result);
+		assert.strictEqual(
+			result.jpqlQuery,
+			'SELECT u FROM User u WHERE u.email = :email AND u.active = :active ORDER BY u.createdAt DESC',
+		);
+		assert.strictEqual(result.isModifying, false);
+		assert.ok(result.requiredImports.includes('org.springframework.data.jpa.repository.Query'));
+	});
+
+	test('converts deleteBy derived query method to modifying JPQL @Query', () => {
+		const result = convertDerivedQueryToJpql({
+			rawText: 'void deleteByEmail(String email);',
+			methodName: 'deleteByEmail',
+			returnType: 'void',
+			entityName: 'User',
+			parameters: [{ name: 'email', type: 'String' }],
+			startOffset: 0,
+			endOffset: 33,
+		}, 'User');
+
+		assert.ok(result);
+		assert.strictEqual(result.jpqlQuery, 'DELETE FROM User u WHERE u.email = :email');
+		assert.strictEqual(result.isModifying, true);
+		assert.ok(result.requiredImports.includes('org.springframework.data.jpa.repository.Modifying'));
+	});
+
+	// ==========================================
+	// 13. ReferenceProvider & RenameProvider
+	// ==========================================
+	test('ReferenceProvider finds property references in JPQL queries and derived methods', async () => {
+		const userUri = vscode.Uri.parse('file:///User.java');
+		const repoUri = vscode.Uri.parse('file:///UserRepository.java');
+		const userText = 'package com.example; @Entity class User { @Id Long id; String email; }';
+		const repoText = 'package com.example; interface UserRepository extends JpaRepository<User, Long> {\n'
+			+ '  List<User> findByEmail(String email);\n'
+			+ '  @Query("SELECT u FROM User u WHERE u.email = :email")\n'
+			+ '  List<User> searchByEmail(@Param("email") String email);\n'
+			+ '}';
+
+		const userDoc = {
+			uri: userUri,
+			languageId: 'java',
+			getText: (range?: vscode.Range) => range ? 'email' : userText,
+			getWordRangeAtPosition: () => new vscode.Range(new vscode.Position(0, userText.indexOf('email')), new vscode.Position(0, userText.indexOf('email') + 5)),
+		} as any;
+		const repoDoc = {
+			uri: repoUri,
+			languageId: 'java',
+			getText: () => repoText,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as any;
+
+		(vscode.workspace as any).textDocuments = [userDoc, repoDoc];
+		const index = WorkspaceEntityIndex.getInstance();
+		index.updateDocument(userDoc);
+
+		const refProvider = new SpringJpaReferenceProvider();
+		const references = await refProvider.provideReferences(
+			userDoc,
+			new vscode.Position(0, userText.indexOf('email')),
+			{} as any,
+			{} as any,
+		);
+
+		assert.ok(references.length >= 2);
+		index.clear();
+	});
+
+	test('RenameProvider renames entity property across derived methods and JPQL queries', async () => {
+		const userUri = vscode.Uri.parse('file:///User.java');
+		const repoUri = vscode.Uri.parse('file:///UserRepository.java');
+		const userText = 'package com.example; @Entity class User { @Id Long id; String email; }';
+		const repoText = 'package com.example; interface UserRepository extends JpaRepository<User, Long> {\n'
+			+ '  List<User> findByEmail(String email);\n'
+			+ '  @Query("SELECT u FROM User u WHERE u.email = :email")\n'
+			+ '  List<User> searchByEmail(@Param("email") String email);\n'
+			+ '}';
+
+		const userDoc = {
+			uri: userUri,
+			languageId: 'java',
+			getText: (range?: vscode.Range) => range ? 'email' : userText,
+			getWordRangeAtPosition: () => new vscode.Range(new vscode.Position(0, userText.indexOf('email')), new vscode.Position(0, userText.indexOf('email') + 5)),
+		} as any;
+		const repoDoc = {
+			uri: repoUri,
+			languageId: 'java',
+			getText: () => repoText,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as any;
+
+		(vscode.workspace as any).textDocuments = [userDoc, repoDoc];
+		const index = WorkspaceEntityIndex.getInstance();
+		index.updateDocument(userDoc);
+
+		const renameProvider = new SpringJpaRenameProvider();
+		const edit = await renameProvider.provideRenameEdits(
+			userDoc,
+			new vscode.Position(0, userText.indexOf('email')),
+			'contactEmail',
+			{} as any,
+		);
+
+		assert.ok(edit);
+		const entries = new Map(edit.entries().map(([u, edits]) => [u.toString(), edits]));
+		assert.ok(entries.has(userUri.toString()));
+		assert.ok(entries.has(repoUri.toString()));
+		index.clear();
 	});
 });

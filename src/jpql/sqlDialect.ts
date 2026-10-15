@@ -87,13 +87,13 @@ export async function resolveSqlDialect(document: vscode.TextDocument, waitForDe
 }
 
 function dialectFromName(name: string): SqlDialect | undefined {
-	if (/postgres|pgsql/.test(name)) return 'postgresql';
-	if (/mariadb/.test(name)) return 'mariadb';
-	if (/mysql/.test(name)) return 'mysql';
-	if (/sqlserver|sql_server|mssql/.test(name)) return 'sqlserver';
-	if (/oracle/.test(name)) return 'oracle';
-	if (/\bh2\b/.test(name)) return 'h2';
-	if (/\bgeneric\b/.test(name)) return 'generic';
+	if (/postgres|pgsql/.test(name)) {return 'postgresql';}
+	if (/mariadb/.test(name)) {return 'mariadb';}
+	if (/mysql/.test(name)) {return 'mysql';}
+	if (/sqlserver|sql_server|mssql/.test(name)) {return 'sqlserver';}
+	if (/oracle/.test(name)) {return 'oracle';}
+	if (/\bh2\b/.test(name)) {return 'h2';}
+	if (/\bgeneric\b/.test(name)) {return 'generic';}
 	return undefined;
 }
 

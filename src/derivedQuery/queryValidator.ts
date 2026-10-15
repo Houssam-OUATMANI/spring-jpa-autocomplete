@@ -13,6 +13,12 @@ export interface MethodSignatureInfo {
 	readonly endOffset: number;
 }
 
+export interface UnknownPropertyInfo {
+	readonly name: string;
+	readonly targetEntityName?: string;
+	readonly inferredType?: string;
+}
+
 export interface DerivedMethodValidationDiagnostic {
 	readonly message: string;
 	readonly severity: 'error' | 'warning';
@@ -23,6 +29,7 @@ export interface DerivedMethodValidationDiagnostic {
 	readonly missingParam?: { name: string; type: string };
 	readonly missingParams?: readonly { name: string; type: string }[];
 	readonly suggestedProperty?: string;
+	readonly unknownProperty?: UnknownPropertyInfo;
 }
 
 const PARAMETERLESS_OPERATORS = new Set([
@@ -55,13 +62,45 @@ export function validateDerivedMethodSignature(
 			const start = signature.startOffset + signature.rawText.indexOf(signature.methodName) + predicate.startOffset;
 			const end = start + predicate.propertyName.length;
 			const suggestion = findClosestProperty(predicate.propertyName, properties.map((property) => property.name));
+
+			let inferredType = 'String';
+			const normalParams = signature.parameters.filter(
+				(p) => !['Pageable', 'Sort', 'Limit', 'ScrollPosition'].some((t) => p.type.includes(t)),
+			);
+			let normalParamIndex = 0;
+			for (const p of parsed.predicates) {
+				if (p.operator && PARAMETERLESS_OPERATORS.has(p.operator)) {
+					continue;
+				}
+				if (p === predicate) {
+					const param = normalParams[normalParamIndex];
+					if (param) {
+						inferredType = param.type.replace(/^(?:Collection|List|Set|Iterable)<(.+)>$/, '$1');
+					} else if (p.operator && ['IsTrue', 'IsFalse', 'True', 'False'].includes(p.operator)) {
+						inferredType = 'boolean';
+					}
+					break;
+				}
+				normalParamIndex += (p.operator && TWO_PARAMETER_OPERATORS.has(p.operator)) ? 2 : 1;
+			}
+
+			const normalizedPropName = predicate.propertyName.includes('_')
+				? predicate.propertyName.split('_').pop()!
+				: predicate.propertyName;
+			const fieldName = normalizedPropName[0].toLowerCase() + normalizedPropName.slice(1);
+
 			diagnostics.push({
 				message: `Unknown entity property '${predicate.propertyName}' in derived query method.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
 				severity: 'error',
 				startOffset: start,
 				endOffset: end,
 				code: 'UNKNOWN_PROPERTY',
-					suggestedProperty: suggestion,
+				suggestedProperty: suggestion,
+				unknownProperty: {
+					name: fieldName,
+					targetEntityName: signature.entityName,
+					inferredType,
+				},
 			});
 		}
 	}

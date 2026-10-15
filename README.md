@@ -112,24 +112,37 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 - **Native SQL support**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with SQL syntax highlighting and table / mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.
   - SQL dialect awareness for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
   - Auto-detection from Spring/Hibernate settings and JDBC URLs, with a workspace-level override and a per-file override for active native queries.
-- **IDE Navigation (Go to Definition - `Ctrl+Click` / `F12`)**:
-  - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
-  - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
-  - Click on repository generic entity `JpaRepository<User, Long>` $\to$ opens `User.java`.
-- **Quick-Fixes (`Alt+Enter` / Lightbulb)**:
+- **IDE Navigation & Refactoring (`F12`, `F2`, `Shift+F12`)**:
+  - **Go to Definition (`F12`)**:
+    - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.
+    - Click on `:param` or `u.prop` in JPQL $\to$ jumps to parameter or entity field.
+    - Click on repository generic entity `JpaRepository<User, Long>` $\to$ opens `User.java`.
+  - **Global Rename Provider (`F2`)**:
+    - Renaming an entity field (`F2`) updates both derived repository method names (e.g. `findByEmail` $\to$ `findByContactEmail`) and JPQL `@Query` property paths (`u.email` $\to$ `u.contactEmail`) across the workspace.
+  - **Find All References (`Shift+F12`)**:
+    - Finds all usages of an entity property across Spring Data repositories and JPQL `@Query` expressions.
+  - **Bidirectional CodeLens**:
+    - CodeLens above Spring Data repositories linking directly to the managed Entity (`Open Managed Entity`).
+    - CodeLens above JPA entities linking directly to the corresponding Spring Data Repositories (`Open Spring Data Repository`).
+- **Quick-Fixes & Refactorings (`Alt+Enter` / Lightbulb)**:
+  - **Create field in Entity**: when typing a derived query method with an unmapped property (e.g. `findByPhoneNumber(String phone)`), generates the private field and accessors directly into the entity class.
+  - **Convert to @Query (JPQL)**: converts any derived query method into its equivalent JPQL `@Query` annotation with mapped operators, `ORDER BY`, `@Param`, and `@Modifying` if needed.
   - Add every missing derived-query parameter in one action.
-  - Fix incompatible return type (`boolean`, `long`).
+  - Fix incompatible return type (`boolean`, `long`, `int`, `void`).
+  - Add missing `@Modifying` annotation to `UPDATE` / `DELETE` queries with automatic import.
   - Rename unknown properties to the closest known entity property when a suggestion is available.
   - Add `@Param` annotation and its import to method parameters.
   - Add `Pageable` parameter and its import when returning `Page<T>`.
-- **Repository generation**:
-  - Run `Spring JPA: Generate Repository Method` with the cursor on a property to generate `findBy`, `readBy`, `getBy`, `queryBy`, `searchBy`, `streamBy`, `existsBy`, `countBy`, `deleteBy`, or `removeBy` methods.
-  - Choose operators such as `Containing`, `In`, `NotIn`, `Between`, `GreaterThan`, `LessThan`, and null/boolean predicates.
-  - Choose `Optional`, `List`, `Page`, `Slice`, or the entity return type; paged signatures include `Pageable`.
-- **IDE assistance**:
-  - Hover information for JPA entities, properties, and relations.
-  - Contextual JPQL hover documentation for clauses, operators, and functions.
-  - CodeLens above repositories showing their managed entity and property count.
+- **JPA Entity & Relationship Diagnostics**:
+  - Validates that every `@Entity` defines an identifier (`@Id` or `@EmbeddedId`), including inherited superclass IDs.
+  - Bidirectional relation validation: checks that `mappedBy` in `@OneToMany` and `@OneToOne` points to a valid property on the target entity, with typo correction suggestions.
+  - Hibernate proxy inspection: warns if an `@Entity` class is declared `final`.
+  - JPA performance linter: warns when `FetchType.EAGER` is declared on collection relationships (`@OneToMany`, `@ManyToMany`), mitigating the N+1 query problem.
+- **Modifying query inspection**:
+  - Enforces `@Modifying` on `UPDATE` and `DELETE` JPQL queries.
+  - Validates modifying query return types (`int`, `Integer`, `void`, or `boolean`).
+- **Autoboxing and type flexibility**:
+  - Full autoboxing support (`long` $\leftrightarrow$ `Long`, `int` $\leftrightarrow$ `Integer`, `boolean` $\leftrightarrow$ `Boolean`, etc.) and numeric family compatibility for JPQL parameters.
 - **Index and performance controls**:
   - Run `Spring JPA: Rebuild Entity Index` after changing project structure.
   - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, `springJpa.includeTestSources`, and `springJpa.enableCodeLens` in VS Code settings.

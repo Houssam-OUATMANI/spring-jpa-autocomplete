@@ -8,7 +8,7 @@ export interface JpqlDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE';
+	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE' | 'MISSING_MODIFYING_ANNOTATION';
 	readonly paramName?: string;
 }
 
@@ -37,6 +37,27 @@ export function validateJpql(
 	// 2. Validate property accesses on aliases: alias.property
 	if (!queryInfo.isNative) {
 		validateReturnType(queryInfo, entityMap, diagnostics);
+		if (queryInfo.isUpdateOrDelete && queryInfo.methodSignature) {
+			if (!queryInfo.isModifying) {
+				diagnostics.push({
+					message: "Modifying query ('UPDATE' or 'DELETE') requires '@Modifying' annotation.",
+					severity: 'error',
+					startOffset: queryInfo.methodSignature.startOffset,
+					endOffset: queryInfo.methodSignature.endOffset,
+					code: 'MISSING_MODIFYING_ANNOTATION',
+				});
+			}
+			const ret = queryInfo.methodSignature.returnType.trim();
+			if (!['int', 'Integer', 'void', 'boolean', 'Boolean'].includes(ret)) {
+				diagnostics.push({
+					message: `Modifying query method '${queryInfo.methodSignature.methodName}' must return 'int', 'Integer', 'void', or 'boolean', but returns '${ret}'.`,
+					severity: 'error',
+					startOffset: queryInfo.methodSignature.startOffset,
+					endOffset: queryInfo.methodSignature.endOffset,
+					code: 'INVALID_RETURN_TYPE',
+				});
+			}
+		}
 		for (const propAccess of queryInfo.propertyAccesses) {
 			const targetEntityName = queryInfo.aliases.get(propAccess.alias);
 			if (targetEntityName) {
@@ -190,14 +211,40 @@ function findParameterPropertyType(
 	return entity ? resolveEntityPropertyPath(entity, access.property, entityMap)?.type : undefined;
 }
 
+const BOXED_TO_PRIMITIVE: Record<string, string> = {
+	integer: 'int',
+	long: 'long',
+	boolean: 'boolean',
+	double: 'double',
+	float: 'float',
+	byte: 'byte',
+	short: 'short',
+	character: 'char',
+};
+
+const NUMERIC_TYPES = new Set(['byte', 'short', 'int', 'long', 'float', 'double', 'bigdecimal', 'biginteger']);
+
 function areJpqlParameterTypesCompatible(propertyType: string, parameterType: string): boolean {
-	const property = normalizeJavaType(propertyType);
-	const parameter = normalizeJavaType(parameterType);
-	if (property === parameter) {
+	const property = normalizeJavaType(propertyType).toLowerCase();
+	const parameter = normalizeJavaType(parameterType).toLowerCase();
+
+	const propNorm = BOXED_TO_PRIMITIVE[property] ?? property;
+	const paramNorm = BOXED_TO_PRIMITIVE[parameter] ?? parameter;
+
+	if (propNorm === paramNorm || property === 'object' || parameter === 'object') {
 		return true;
 	}
-	const parameterElement = parameter.match(/^(?:Collection|List|Set|Iterable|Stream)<(.+)>$/)?.[1];
-	return parameterElement === property;
+
+	if (NUMERIC_TYPES.has(propNorm) && NUMERIC_TYPES.has(paramNorm)) {
+		return true;
+	}
+
+	const parameterElement = parameter.match(/^(?:collection|list|set|iterable|stream)<(.+)>$/)?.[1];
+	if (parameterElement) {
+		return areJpqlParameterTypesCompatible(propertyType, parameterElement);
+	}
+
+	return false;
 }
 
 function normalizeJavaType(type: string): string {

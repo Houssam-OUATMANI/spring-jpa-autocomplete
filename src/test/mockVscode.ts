@@ -123,6 +123,8 @@ export class WorkspaceEdit {
 
 export enum CodeActionKind {
 	QuickFix = 'quickfix',
+	Refactor = 'refactor',
+	RefactorRewrite = 'refactor.rewrite',
 }
 
 export class CodeAction {

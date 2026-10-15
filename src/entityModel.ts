@@ -15,6 +15,8 @@ export interface EntityProperty {
 	readonly isTransient?: boolean;
 	readonly relation?: JpaRelation;
 	readonly targetEntity?: string;
+	readonly mappedBy?: string;
+	readonly fetchType?: 'EAGER' | 'LAZY';
 	readonly columnName?: string;
 	readonly isCollection?: boolean;
 	readonly location?: PropertyLocation;
@@ -29,6 +31,7 @@ export interface EntityInfo {
 	readonly packageName?: string;
 	readonly uri: vscode.Uri;
 	readonly isEntity?: boolean;
+	readonly isFinal?: boolean;
 	readonly isProjection?: boolean;
 	readonly superclassName?: string;
 	readonly isMappedSuperclass?: boolean;

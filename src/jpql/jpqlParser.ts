@@ -11,6 +11,8 @@ export interface JpqlQueryInfo {
 	readonly repositoryPackage?: string;
 	readonly repositoryImports: readonly string[];
 	readonly isNative: boolean;
+	readonly isModifying?: boolean;
+	readonly isUpdateOrDelete?: boolean;
 	readonly selectedExpression?: string;
 	readonly selectedAlias?: string;
 	readonly dtoProjectionType?: string;
@@ -29,6 +31,7 @@ export interface JpqlMethodSignature {
 	readonly returnType: string;
 	readonly startOffset: number;
 	readonly endOffset: number;
+	readonly isModifying?: boolean;
 	readonly parameters: readonly { name: string; type: string; isParamAnnotated: boolean; paramName?: string; startOffset: number; endOffset: number }[];
 }
 
@@ -72,6 +75,9 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		const contentStartOffset = sourceOffsets[0];
 		const queryEndOffset = sourceOffsets[sourceOffsets.length - 1] + 1;
 
+		const isModifying = /@Modifying\b/.test(documentText.slice(Math.max(0, match.index - 150), methodEnd));
+		const isUpdateOrDelete = /^\s*(?:UPDATE\b|DELETE\b)/i.test(queryContent.trim());
+
 		// Extract method signature
 		const methodParamsOffset = paramsStart;
 		const methodSignature: JpqlMethodSignature = {
@@ -80,6 +86,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			returnType,
 			startOffset: match.index,
 			endOffset: match.index + fullMatch.length,
+			isModifying,
 			parameters: parseMethodParametersWithOffsets(paramsText, methodParamsOffset),
 		};
 
@@ -106,6 +113,8 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			repositoryPackage: documentText.match(/\bpackage\s+([\w.]+)\s*;/)?.[1],
 			repositoryImports,
 			isNative,
+			isModifying,
+			isUpdateOrDelete,
 			selectedExpression,
 			selectedAlias,
 			dtoProjectionType,

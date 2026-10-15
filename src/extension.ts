@@ -14,6 +14,9 @@ import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
 import { parseJavaParameters } from './javaParsing';
 import { resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
+import { validateJpaEntities } from './entityValidator';
+import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
+import { SpringJpaRenameProvider } from './navigation/renameProvider';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -28,7 +31,8 @@ export function shouldDisplayDiagnostic(mode: DiagnosticDisplayMode, severity: '
 
 export function hasJpaDiagnosticTargets(text: string): boolean {
 	return /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</.test(text)
-		|| /@(Query|NativeQuery)\s*\(/.test(text);
+		|| /@(Query|NativeQuery)\s*\(/.test(text)
+		|| /@Entity\b/.test(text);
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -86,6 +90,20 @@ export function activate(context: vscode.ExtensionContext) {
 		vscode.window.showInformationMessage(`Workspace SQL dialect set to ${selected.label === 'Workspace default' ? 'Auto-detect' : selected.label}.`);
 	});
 	context.subscriptions.push(selectSqlDialect);
+
+	const openEntity = vscode.commands.registerCommand('springJpa.openEntity', async (uri: vscode.Uri) => {
+		if (uri) {
+			await vscode.window.showTextDocument(uri);
+		}
+	});
+	context.subscriptions.push(openEntity);
+
+	const openRepository = vscode.commands.registerCommand('springJpa.openRepository', async (uri: vscode.Uri) => {
+		if (uri) {
+			await vscode.window.showTextDocument(uri);
+		}
+	});
+	context.subscriptions.push(openRepository);
 
 	const generateMethod = vscode.commands.registerCommand('springJpa.generateRepositoryMethod', async () => {
 		const editor = vscode.window.activeTextEditor;
@@ -344,6 +362,18 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 	context.subscriptions.push(codeActionProvider);
 
+	const referenceProvider = vscode.languages.registerReferenceProvider(
+		{ language: 'java', scheme: 'file' },
+		new SpringJpaReferenceProvider(),
+	);
+	context.subscriptions.push(referenceProvider);
+
+	const renameProvider = vscode.languages.registerRenameProvider(
+		{ language: 'java', scheme: 'file' },
+		new SpringJpaRenameProvider(),
+	);
+	context.subscriptions.push(renameProvider);
+
 	// 4. Diagnostics Refresh
 	const refreshJavaDiagnostics = async (document: vscode.TextDocument) => {
 		if (document.languageId !== 'java') {
@@ -360,11 +390,12 @@ export function activate(context: vscode.ExtensionContext) {
 		const derivedMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.derivedQueries', 'all');
 		const jpqlMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.jpql', 'all');
 
-		// Check if current file is a repository interface
+		// Check if current file has diagnostic targets
 		const isRepo = derivedMode !== 'off'
 			&& /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
 		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
-		if (!isRepo && !hasJpqlQueries) {
+		const hasEntities = derivedMode !== 'off' && /@Entity\b/.test(docText);
+		if (!isRepo && !hasJpqlQueries && !hasEntities) {
 			diagnostics.set(document.uri, documentDiagnostics);
 			return;
 		}
@@ -453,6 +484,27 @@ export function activate(context: vscode.ExtensionContext) {
 					diagnostic.code = d.code;
 					documentDiagnostics.push(diagnostic);
 				}
+			}
+		}
+
+		if (hasEntities) {
+			const currentEntities = entityIndex.getEntitiesForUri(document.uri);
+			const allEntities = entityIndex.getAllEntities();
+			const entityDiags = validateJpaEntities(currentEntities, allEntities, docText);
+			for (const diag of entityDiags) {
+				if (!shouldDisplayDiagnostic(derivedMode, diag.severity)) {
+					continue;
+				}
+				const startPos = new vscode.Position(diag.line, diag.character);
+				const endPos = new vscode.Position(diag.line, diag.character + diag.length);
+				const vsDiag = new vscode.Diagnostic(
+					new vscode.Range(startPos, endPos),
+					diag.message,
+					diag.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning,
+				);
+				vsDiag.source = 'spring-jpa';
+				vsDiag.code = diag.code;
+				documentDiagnostics.push(vsDiag);
 			}
 		}
 

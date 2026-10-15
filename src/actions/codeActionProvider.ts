@@ -1,25 +1,31 @@
 import * as vscode from 'vscode';
+import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDiscovery';
+import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
+import { parseJavaParameters } from '../javaParsing';
 
 interface SpringJpaDiagnostic extends vscode.Diagnostic {
 	missingParam?: { name: string; type: string };
 	missingParams?: readonly { name: string; type: string }[];
 	suggestedProperty?: string;
 	expectedReturnType?: string;
+	unknownProperty?: { name: string; targetEntityName?: string; inferredType?: string };
 }
 
 export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 	public static readonly providedCodeActionKinds = [
 		vscode.CodeActionKind.QuickFix,
+		vscode.CodeActionKind.Refactor,
 	];
 
 	public provideCodeActions(
 		document: vscode.TextDocument,
 		range: vscode.Range | vscode.Selection,
 		context: vscode.CodeActionContext,
-		token: vscode.CancellationToken,
+		_token: vscode.CancellationToken,
 	): vscode.CodeAction[] {
 		const actions: vscode.CodeAction[] = [];
 
+		// 1. Diagnostics-driven Quick-Fixes
 		for (const diagnostic of context.diagnostics) {
 			if (diagnostic.source !== 'spring-jpa') {
 				continue;
@@ -41,6 +47,17 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					action.isPreferred = true;
 					actions.push(action);
 				}
+			} else if (code === 'MISSING_MODIFYING_ANNOTATION') {
+				const action = new vscode.CodeAction(
+					"Add '@Modifying' annotation",
+					vscode.CodeActionKind.QuickFix,
+				);
+				action.edit = new vscode.WorkspaceEdit();
+				action.edit.insert(document.uri, diagnostic.range.start, '@Modifying\n\t');
+				addImportIfMissing(action.edit, document, 'org.springframework.data.jpa.repository.Modifying');
+				action.diagnostics = [diagnostic];
+				action.isPreferred = true;
+				actions.push(action);
 			} else if (code === 'MISSING_PARAM_ANNOTATION') {
 				const match = diagnostic.message.match(/missing '@Param\("([^"]+)"\)'/);
 				if (match) {
@@ -57,7 +74,6 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					actions.push(action);
 				}
 			} else if (code === 'MISSING_PAGEABLE') {
-				// Find closing parenthesis of method parameters on current line
 				const lineText = document.lineAt(diagnostic.range.start.line).text;
 				const closeParen = lineText.lastIndexOf(')');
 				if (closeParen >= 0) {
@@ -101,20 +117,101 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						actions.push(action);
 					}
 				}
-			} else if (code === 'UNKNOWN_PROPERTY' && springDiagnostic.suggestedProperty) {
-				const action = new vscode.CodeAction(
-					`Rename property to '${springDiagnostic.suggestedProperty}'`,
-					vscode.CodeActionKind.QuickFix,
-				);
-				action.edit = new vscode.WorkspaceEdit();
-				action.edit.replace(document.uri, diagnostic.range, springDiagnostic.suggestedProperty);
-				action.diagnostics = [diagnostic];
-				action.isPreferred = true;
-				actions.push(action);
+			} else if (code === 'UNKNOWN_PROPERTY') {
+				if (springDiagnostic.suggestedProperty) {
+					const action = new vscode.CodeAction(
+						`Rename property to '${springDiagnostic.suggestedProperty}'`,
+						vscode.CodeActionKind.QuickFix,
+					);
+					action.edit = new vscode.WorkspaceEdit();
+					action.edit.replace(document.uri, diagnostic.range, springDiagnostic.suggestedProperty);
+					action.diagnostics = [diagnostic];
+					action.isPreferred = true;
+					actions.push(action);
+				}
+
+				if (springDiagnostic.unknownProperty?.targetEntityName) {
+					const targetEntity = WorkspaceEntityIndex.getInstance().getEntity(springDiagnostic.unknownProperty.targetEntityName);
+					if (targetEntity) {
+						const propName = springDiagnostic.unknownProperty.name;
+						const propType = springDiagnostic.unknownProperty.inferredType ?? 'String';
+						const createAction = new vscode.CodeAction(
+							`Create field '${propName}' in '${targetEntity.name}.java'`,
+							vscode.CodeActionKind.QuickFix,
+						);
+						createAction.diagnostics = [diagnostic];
+						createAction.edit = new vscode.WorkspaceEdit();
+						createFieldInEntity(createAction.edit, targetEntity, propName, propType);
+						actions.push(createAction);
+					}
+				}
+			}
+		}
+
+		// 2. Refactoring Code Action: Convert Derived Query Method to @Query JPQL
+		if (typeof document.lineAt === 'function' && typeof document.getText === 'function') {
+			const lineText = document.lineAt(range.start.line).text;
+			const methodMatch = lineText.match(/\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)/);
+			if (methodMatch) {
+				const returnType = methodMatch[1].trim();
+				const methodName = methodMatch[2];
+				const paramsText = methodMatch[3];
+				const docText = document.getText();
+				const offset = typeof document.offsetAt === 'function' ? document.offsetAt(range.start) : 0;
+				const repoEntityName = extractRepositoryEntityNameAt(docText, offset);
+				if (repoEntityName) {
+					const converted = convertDerivedQueryToJpql({
+						rawText: methodMatch[0],
+						returnType,
+						methodName,
+						entityName: repoEntityName,
+						parameters: parseJavaParameters(paramsText),
+						startOffset: 0,
+						endOffset: methodMatch[0].length,
+					}, repoEntityName);
+
+					if (converted) {
+						const action = new vscode.CodeAction(
+							`Convert '${methodName}' to @Query (JPQL)`,
+							vscode.CodeActionKind.Refactor,
+						);
+						action.edit = new vscode.WorkspaceEdit();
+						const indent = lineText.match(/^\s*/)?.[0] ?? '\t';
+						const modifyingAnnotation = converted.isModifying ? `${indent}@Modifying\n` : '';
+						const queryAnnotation = `${modifyingAnnotation}${indent}@Query("${converted.jpqlQuery}")\n`;
+						action.edit.insert(document.uri, new vscode.Position(range.start.line, 0), queryAnnotation);
+
+						for (const imp of converted.requiredImports) {
+							addImportIfMissing(action.edit, document, imp);
+						}
+						actions.push(action);
+					}
+				}
 			}
 		}
 
 		return actions;
+	}
+}
+
+function createFieldInEntity(
+	edit: vscode.WorkspaceEdit,
+	targetEntity: { uri: vscode.Uri; name: string },
+	propName: string,
+	propType: string,
+): void {
+	const targetDoc = vscode.workspace.textDocuments.find((d) => d.uri.toString() === targetEntity.uri.toString());
+	const text = targetDoc?.getText() ?? '';
+	const lastBrace = text.lastIndexOf('}');
+	if (lastBrace >= 0 && targetDoc) {
+		const hasLombok = /@(Data|Getter|Value)\b/.test(text);
+		const cap = propName[0].toUpperCase() + propName.slice(1);
+		const fieldCode = hasLombok
+			? `\n\tprivate ${propType} ${propName};\n`
+			: `\n\tprivate ${propType} ${propName};\n\n\tpublic ${propType} get${cap}() {\n\t\treturn ${propName};\n\t}\n\n\tpublic void set${cap}(${propType} ${propName}) {\n\t\tthis.${propName} = ${propName};\n\t}\n`;
+		edit.insert(targetEntity.uri, targetDoc.positionAt(lastBrace), fieldCode);
+	} else {
+		edit.insert(targetEntity.uri, new vscode.Position(0, 0), `\n\tprivate ${propType} ${propName};\n`);
 	}
 }
 
@@ -138,5 +235,8 @@ function addImportIfMissing(edit: vscode.WorkspaceEdit, document: vscode.TextDoc
 
 	const packageMatch = /\bpackage\s+[\w.]+\s*;/.exec(text);
 	const offset = packageMatch ? packageMatch.index + packageMatch[0].length : 0;
-	edit.insert(document.uri, document.positionAt(offset), `\n\nimport ${importName};`);
+	const pos = typeof document.positionAt === 'function'
+		? document.positionAt(offset)
+		: new vscode.Position(0, offset);
+	edit.insert(document.uri, pos, `\n\nimport ${importName};`);
 }

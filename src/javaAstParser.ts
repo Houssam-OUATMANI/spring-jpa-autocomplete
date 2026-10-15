@@ -42,10 +42,12 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): Enti
 			continue;
 		}
 
+		const rawModifiers = [...childNodes(declaration, 'classModifier'), ...childNodes(declaration, 'interfaceModifier')];
 		const typeAnnotations = annotationDetails(
-			[...childNodes(declaration, 'classModifier'), ...childNodes(declaration, 'interfaceModifier')],
+			rawModifiers,
 			text,
 		);
+		const isFinal = rawModifiers.some((modifier) => textOf(modifier, text) === 'final');
 		const annotations = new Set(typeAnnotations.map((annotation) => annotation.name));
 		const record = descendant(classDeclaration, 'recordDeclaration');
 		const normalClass = descendant(classDeclaration, 'normalClassDeclaration');
@@ -124,6 +126,7 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): Enti
 			packageName,
 			uri,
 			...(isEntity ? { isEntity: true } : {}),
+			...(isFinal ? { isFinal: true } : {}),
 			isProjection: isProjection || undefined,
 			superclassName,
 			isMappedSuperclass,
@@ -195,6 +198,10 @@ function createProperty(
 	const relationNames: readonly JpaRelation[] = ['OneToOne', 'OneToMany', 'ManyToOne', 'ManyToMany', 'ElementCollection', 'EmbeddedId', 'Embedded'];
 	const relation = annotations.map((annotation) => relationNames.find((relationName) => annotation.name === relationName)).find(Boolean);
 	const targetEntity = annotations.map((annotation) => annotation.text.match(/\btargetEntity\s*=\s*([\w$.]+)\.class/)?.[1]).find(Boolean);
+	const mappedBy = annotationValue(annotations, 'OneToMany', 'mappedBy')
+		?? annotationValue(annotations, 'OneToOne', 'mappedBy')
+		?? annotationValue(annotations, 'ManyToMany', 'mappedBy');
+	const fetchType = annotations.map((a) => a.text.match(/\bfetch\s*=\s*FetchType\.(EAGER|LAZY)\b/)?.[1] as 'EAGER' | 'LAZY' | undefined).find(Boolean);
 	const columnName = annotationValue(annotations, 'Column', 'name') ?? annotationValue(annotations, 'JoinColumn', 'name');
 	return {
 		name,
@@ -202,6 +209,8 @@ function createProperty(
 		isId: annotations.some((annotation) => annotation.name === 'Id' || annotation.name === 'EmbeddedId'),
 		relation,
 		targetEntity,
+		mappedBy,
+		fetchType,
 		columnName,
 		isCollection: /\b(?:Collection|List|Set|Iterable|Map)\s*</.test(type) || /\[\]/.test(type),
 		location: location(text, nameToken.startOffset, nameToken.endOffset - nameToken.startOffset + 1),
