@@ -4,6 +4,22 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.0.3] - 2026-10-15
+
+### Added
+
+- **Resilient entity indexing** — classes that declare JPA mapping annotations (`@Id`, `@Table`, `@ManyToOne`, `@OneToMany`, `@ManyToMany`, `@OneToOne`, `@JoinColumn`, `@Column`, `@GeneratedValue`, `@EmbeddedId`) are now indexed automatically even when the `@Entity` annotation is missing. Autocomplete, derived-query validation, CodeLens, and `@Query` JPQL validation all work immediately without requiring `@Entity` to be present.
+- **`MISSING_ENTITY_ANNOTATION` diagnostic** — a new error-level diagnostic is emitted on any class that carries JPA mappings but lacks `@Entity`. The message clearly names the affected class.
+- **Quick-Fix: Add `@Entity`** — a one-click Quick-Fix (`Alt+Enter`) inserts the missing `@Entity` annotation above the class declaration and adds the appropriate import (`jakarta.persistence.Entity` or `javax.persistence.Entity`) automatically, detecting which namespace the project already uses.
+- **Wildcard import awareness** — the Quick-Fix import insertion now skips redundant imports when a wildcard (`import jakarta.persistence.*`) already covers the annotation.
+- Support for `Repository` and `RevisionRepository` in CodeLens and entity discovery in addition to the existing Spring Data repository types.
+
+### Fixed
+
+- `findByPrice` and other derived queries no longer report *"Unknown entity property"* on classes that are missing `@Entity` — they are now fully indexed from their JPA field annotations.
+- `@Query("SELECT b FROM Book b WHERE b.price = :price")` no longer reports *"Unknown JPA entity 'Book'"* when `@Entity` is absent.
+- CodeLens (*"N properties"*) is now shown correctly for entities indexed via JPA markers.
+
 ## [1.0.2] - 2026-10-07
 
 ### Improved
