@@ -32,7 +32,7 @@ export interface JpqlMethodSignature {
 	readonly startOffset: number;
 	readonly endOffset: number;
 	readonly isModifying?: boolean;
-	readonly parameters: readonly { name: string; type: string; isParamAnnotated: boolean; paramName?: string; startOffset: number; endOffset: number }[];
+	readonly parameters: readonly { name: string; type: string; isParamAnnotated: boolean; paramName?: string; typeStartOffset: number; startOffset: number; endOffset: number }[];
 }
 
 export function extractAllJpqlQueries(documentText: string, knownEntities: readonly EntityInfo[]): JpqlQueryInfo[] {
@@ -401,13 +401,21 @@ function parseMethodParametersWithOffsets(
 ): JpqlMethodSignature['parameters'] {
 	return splitTopLevelParameters(paramsText, baseOffset).map((part) => {
 		const parsed = parseJavaParameters(part.text, part.startOffset)[0];
-		return parsed ? {
+		if (!parsed) {
+			return undefined;
+		}
+		// typeStartOffset points to the very beginning of this parameter's text
+		// (i.e. before any existing annotations/modifiers and the type keyword).
+		// It is used by the quick-fix to insert @Param in the correct position.
+		const typeStartOffset = part.startOffset + part.text.search(/\S/);
+		return {
 			name: parsed.name,
 			type: parsed.type,
 			isParamAnnotated: parsed.isParamAnnotated,
 			paramName: parsed.paramName,
+			typeStartOffset,
 			startOffset: parsed.nameOffset,
 			endOffset: parsed.nameOffset + parsed.name.length,
-		} : undefined;
+		};
 	}).filter((parameter): parameter is NonNullable<typeof parameter> => parameter !== undefined);
 }

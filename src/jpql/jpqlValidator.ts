@@ -135,7 +135,9 @@ export function validateJpql(
 					diagnostics.push({
 						message: `Method parameter '${p.name}' is used in @Query but missing '@Param(\"${p.name}\")' annotation.`,
 						severity: 'warning',
-						startOffset: p.startOffset,
+						// typeStartOffset is the insertion point for @Param (before the type keyword).
+						// Fall back to nameOffset when typeStartOffset is unavailable (e.g. tests).
+						startOffset: p.typeStartOffset ?? p.startOffset,
 						endOffset: p.endOffset,
 						code: 'MISSING_PARAM_ANNOTATION',
 						paramName: p.name,

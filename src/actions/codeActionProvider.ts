@@ -78,6 +78,9 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 				const match = diagnostic.message.match(/missing '@Param\("([^"]+)"\)'/);
 				if (match) {
 					const paramName = match[1];
+					// Individual fix: diagnostic.range.start is now the typeStartOffset
+					// (beginning of the parameter, before the type keyword) so the
+					// annotation is inserted in the correct position.
 					const action = new vscode.CodeAction(
 						`Add '@Param("${paramName}")' annotation`,
 						vscode.CodeActionKind.QuickFix,
@@ -88,6 +91,41 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					action.diagnostics = [diagnostic];
 					action.isPreferred = true;
 					actions.push(action);
+				}
+
+				// "Fix all" action: fix every MISSING_PARAM_ANNOTATION on the same
+				// method line in a single edit. Only generated once (for the first
+				// diagnostic on the line) when more than one parameter is missing the
+				// annotation.
+				const sameLineDiags = context.diagnostics.filter(
+					(d) =>
+						d.source === 'spring-jpa'
+						&& (typeof d.code === 'object' ? d.code.value : d.code) === 'MISSING_PARAM_ANNOTATION'
+						&& d.range.start.line === diagnostic.range.start.line,
+				);
+				if (sameLineDiags.length > 1 && sameLineDiags[0] === diagnostic) {
+					const allNames = sameLineDiags
+						.map((d) => d.message.match(/missing '@Param\("([^"]+)"\)'/)?.[1])
+						.filter((name): name is string => name !== undefined);
+					if (allNames.length === sameLineDiags.length) {
+						const fixAll = new vscode.CodeAction(
+							`Add all ${allNames.length} missing '@Param' annotations`,
+							vscode.CodeActionKind.QuickFix,
+						);
+						fixAll.edit = new vscode.WorkspaceEdit();
+						// Apply insertions in reverse position order so earlier offsets
+						// are not invalidated by preceding insertions.
+						const sorted = [...sameLineDiags].sort((a, b) => b.range.start.compareTo(a.range.start));
+						for (const d of sorted) {
+							const name = d.message.match(/missing '@Param\("([^"]+)"\)'/)?.[1];
+							if (name) {
+								fixAll.edit.insert(document.uri, d.range.start, `@Param("${name}") `);
+							}
+						}
+						addImportIfMissing(fixAll.edit, document, 'org.springframework.data.repository.query.Param');
+						fixAll.diagnostics = [...sameLineDiags];
+						actions.push(fixAll);
+					}
 				}
 			} else if (code === 'MISSING_PAGEABLE') {
 				const lineText = document.lineAt(diagnostic.range.start.line).text;
