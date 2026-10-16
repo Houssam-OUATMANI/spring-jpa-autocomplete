@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { EntityInfo } from '../entityModel';
+import { EntityInfo, ProjectionTypeInfo } from '../entityModel';
 import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy, resolveEntityPropertyPath } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
 import { JPQL_KEYWORDS, JPQL_CONDITIONAL, JPQL_FUNCTIONS } from './jpqlLanguage';
@@ -12,6 +12,12 @@ export function createJpqlCompletions(
 	position: vscode.Position,
 	entities: readonly EntityInfo[],
 	sqlDialect: SqlDialect = 'generic',
+	projectionTypes: readonly ProjectionTypeInfo[] = entities.map((entity) => ({
+		name: entity.name,
+		packageName: entity.packageName,
+		kind: 'class',
+		uri: entity.uri,
+	})),
 ): vscode.CompletionItem[] | undefined {
 	const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
 
@@ -47,19 +53,21 @@ export function createJpqlCompletions(
 		const partial = typedType.split('.').pop() ?? '';
 		const startPos = new vscode.Position(position.line, position.character - typedType.length);
 		const replaceRange = new vscode.Range(startPos, position);
-		const dtoItems = entities
-			.filter((entity) => {
-				const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
+		const dtoItems = projectionTypes
+			.filter((type) => {
+				const qualifiedName = type.packageName ? `${type.packageName}.${type.name}` : type.name;
 				return typedType.includes('.')
 					? qualifiedName.toLowerCase().startsWith(typedType.toLowerCase())
-					: entity.name.toLowerCase().startsWith(partial.toLowerCase());
+					: type.name.toLowerCase().startsWith(partial.toLowerCase());
 			})
-			.map((entity) => {
-				const item = new vscode.CompletionItem(entity.name, vscode.CompletionItemKind.Class);
-				const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
+			.map((type) => {
+				const item = new vscode.CompletionItem(type.name, type.kind === 'interface'
+					? vscode.CompletionItemKind.Interface
+					: vscode.CompletionItemKind.Class);
+				const qualifiedName = type.packageName ? `${type.packageName}.${type.name}` : type.name;
 				item.detail = `DTO projection: ${qualifiedName}`;
-				item.insertText = typedType.includes('.') ? qualifiedName : entity.name;
-				item.sortText = `0_${entity.name}`;
+				item.insertText = qualifiedName;
+				item.sortText = `0_${type.name}`;
 				item.range = replaceRange;
 				return item;
 			});

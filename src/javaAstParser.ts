@@ -1,4 +1,4 @@
-import { EntityInfo, EntityProperty, JpaRelation, PropertyLocation } from './entityModel';
+import { EntityInfo, EntityProperty, JpaRelation, ProjectionTypeInfo, PropertyLocation } from './entityModel';
 
 interface CstNode {
 	readonly name: string;
@@ -21,7 +21,7 @@ export function parseEntityModelAst(text: string, uri: EntityInfo['uri']): Entit
 	return parseEntityModelsAst(text, uri)[0];
 }
 
-export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): EntityInfo[] {
+export function parseEntityModelsAst(text: string, uri: EntityInfo['uri'], projectionTypes?: ProjectionTypeInfo[]): EntityInfo[] {
 	const root = parse(text);
 	const unit = childNodes(root, 'ordinaryCompilationUnit')[0];
 	if (!unit) {
@@ -64,6 +64,12 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri']): Enti
 		if (!identifier) {
 			continue;
 		}
+		projectionTypes?.push({
+			name: identifier.image,
+			packageName,
+			kind: record ? 'record' : normalInterface ? 'interface' : 'class',
+			uri,
+		});
 
 		const properties = new Map<string, EntityProperty>();
 		if (record) {

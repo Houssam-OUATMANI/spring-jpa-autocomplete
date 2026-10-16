@@ -41,6 +41,13 @@ export interface EntityInfo {
 	readonly location?: PropertyLocation;
 }
 
+export interface ProjectionTypeInfo {
+	readonly name: string;
+	readonly packageName?: string;
+	readonly kind: 'class' | 'interface' | 'record';
+	readonly uri: vscode.Uri;
+}
+
 const ENTITY_ANNOTATION = /@Entity\b(?:\s*\([^)]*\))?/;
 const MAPPED_SUPERCLASS_ANNOTATION = /@MappedSuperclass\b/;
 const EMBEDDABLE_ANNOTATION = /@Embeddable\b/;
@@ -59,20 +66,32 @@ export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | un
 	return parseEntityModels(text, uri)[0];
 }
 
-export function parseEntityModels(text: string, uri: vscode.Uri): EntityInfo[] {
+export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes?: ProjectionTypeInfo[]): EntityInfo[] {
 	const hasEntityAnnotation = ENTITY_MODEL_ANNOTATION.test(text);
 	const hasRecord = RECORD_DECLARATION_KEYWORD.test(text);
 	const hasProjection = PROJECTION_INTERFACE.test(text) && PROJECTION_GETTER.test(text) && !REPOSITORY_INTERFACE.test(text);
-	if (!hasEntityAnnotation && !hasRecord && !hasProjection) {
+	if (!hasEntityAnnotation && !hasRecord && !hasProjection && !projectionTypes) {
 		return [];
 	}
 
 	try {
-		const astEntities = parseEntityModelsAst(text, uri);
+		const astEntities = parseEntityModelsAst(text, uri, projectionTypes);
 		if (astEntities.length > 0) {
 			return astEntities;
 		}
 	} catch {
+		if (projectionTypes) {
+			const maskedText = maskJavaSource(text);
+			const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
+			for (const match of maskedText.matchAll(/\b(record|class|interface)\s+([A-Za-z_$]\w*)/g)) {
+				projectionTypes.push({
+					name: match[2],
+					packageName,
+					kind: match[1] as ProjectionTypeInfo['kind'],
+					uri,
+				});
+			}
+		}
 		const legacyEntity = parseEntityModelLegacy(text, uri);
 		return legacyEntity ? [legacyEntity] : [];
 	}

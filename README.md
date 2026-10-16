@@ -1,6 +1,6 @@
 # Spring Data JPA Tools
 
-**Version 1.0.2** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
+**Version 1.0.4** · [Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 
 Write Spring Data JPA repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and entity models.
 
@@ -102,12 +102,16 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
   - Package-aware entity resolution when classes share the same simple name.
   - Accurate diagnostics for unknown entities, properties under aliases, and named parameters.
   - Positional query parameters (`?1` and legacy `?`) with signature/type validation, completion, and navigation.
-  - Constructor DTO projections via `SELECT NEW`, with DTO completion and return-type validation.
+  - Constructor DTO projections via `SELECT NEW`, with workspace-wide class, record, and interface completions that insert fully qualified names, plus return-type validation.
   - Return-type validation between the JPQL `SELECT` entity and the repository method, including collection, optional, page, and slice results.
   - JPQL vocabulary and completion for clauses, operators, aggregates, string, numeric, temporal, collection, type, and custom functions.
+  - **Conditional expressions** — `CASE WHEN … THEN … ELSE … END` with a ready-to-use snippet (tabstops for condition, result, and default), dedicated syntax highlighting scope (`keyword.control.conditional.jpql`), and full hover documentation that highlights the complete CASE block.
+  - **`COALESCE(…)` and `NULLIF(…)`** — JPQL conditional functions with snippet completion, hover docs, and syntax highlighting.
+  - **`NEW`** (DTO constructor projection) and **`ESCAPE`** (LIKE escape character) highlighted and documented.
+  - Rich inline documentation in the completion popup for every keyword, function, and conditional keyword (syntax + practical example shown directly in the completion list).
   - Syntax highlighting inside `@Query` strings and text blocks for clauses, entities, aliases, properties, parameters, operators, functions, literals, and numbers.
   - Entity, alias-property, and named-parameter completions use context from earlier lines in JPQL text blocks.
-  - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LEFT JOIN`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, and more.
+  - Short English hover documentation for JPQL keywords and functions, including syntax and a practical use case for `SELECT`, `LEFT JOIN`, `LIKE`, `LOWER`, `UPPER`, `COUNT`, `CASE`, `COALESCE`, and more.
   - Hover documentation recognizes compound join keywords such as `LEFT JOIN`, `LEFT OUTER JOIN`, and `INNER JOIN` as a single JPQL construct.
 - **Native SQL support**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with SQL syntax highlighting and table / mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.
   - SQL dialect awareness for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
@@ -131,7 +135,8 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
   - Fix incompatible return type (`boolean`, `long`, `int`, `void`).
   - Add missing `@Modifying` annotation to `UPDATE` / `DELETE` queries with automatic import.
   - Rename unknown properties to the closest known entity property when a suggestion is available.
-  - Add `@Param` annotation and its import to method parameters.
+  - Add `@Param` annotation to a single method parameter (quick-fix now inserts before the type, not inside it).
+  - **Add all missing `@Param` annotations in one action** — when multiple parameters are missing `@Param`, a single "Add all N missing '@Param' annotations" quick-fix fixes them all at once.
   - Add `Pageable` parameter and its import when returning `Page<T>`.
 - **JPA Entity & Relationship Diagnostics**:
   - Validates that every `@Entity` defines an identifier (`@Id` or `@EmbeddedId`), including inherited superclass IDs.
@@ -170,7 +175,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The latest release is `1.0.0`; see [CHANGELOG.md](CHANGELOG.md) for release notes.
+The latest release is `1.0.4`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ## Requirements
 

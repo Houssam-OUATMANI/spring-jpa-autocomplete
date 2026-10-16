@@ -288,7 +288,7 @@ export function activate(context: vscode.ExtensionContext) {
 				if (/@(?:Query|NativeQuery)\s*\(/.test(docText)) {
 					const hasNativeQuery = /@NativeQuery\b|nativeQuery\s*=\s*true/.test(docText);
 					const sqlDialect = hasNativeQuery ? await resolveSqlDialect(document, false) : 'generic';
-					const jpqlItems = createJpqlCompletions(document, position, entities, sqlDialect);
+					const jpqlItems = createJpqlCompletions(document, position, entities, sqlDialect, entityIndex.getAllProjectionTypes());
 					if (jpqlItems && jpqlItems.length > 0) {
 						return jpqlItems;
 					}

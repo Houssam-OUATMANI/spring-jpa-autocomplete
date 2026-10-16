@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { EntityInfo, EntityProperty, parseEntityModels, PropertyLocation } from './entityModel';
+import { EntityInfo, EntityProperty, parseEntityModels, ProjectionTypeInfo, PropertyLocation } from './entityModel';
 
-export { EntityInfo, EntityProperty, PropertyLocation };
+export { EntityInfo, EntityProperty, ProjectionTypeInfo, PropertyLocation };
 
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
@@ -32,6 +32,7 @@ function sourceFingerprint(text: string): string {
 export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
 	private entitiesByUri = new Map<string, readonly EntityInfo[]>();
+	private projectionTypesByUri = new Map<string, readonly ProjectionTypeInfo[]>();
 	private entitiesByName = new Map<string, EntityInfo[]>();
 	private sourceFingerprints = new Map<string, string>();
 	private isInitialized = false;
@@ -56,6 +57,7 @@ export class WorkspaceEntityIndex {
 
 	public clear(): void {
 		this.entitiesByUri.clear();
+		this.projectionTypesByUri.clear();
 		this.entitiesByName.clear();
 		this.sourceFingerprints.clear();
 		this.isInitialized = false;
@@ -73,8 +75,10 @@ export class WorkspaceEntityIndex {
 			return this.entitiesByUri.get(uriKey)?.[0];
 		}
 		const previousEntities = this.entitiesByUri.get(uriKey);
-		const entities = parseEntityModels(text, document.uri);
+		const projectionTypes: ProjectionTypeInfo[] = [];
+		const entities = parseEntityModels(text, document.uri, projectionTypes);
 		this.sourceFingerprints.set(uriKey, fingerprint);
+		this.projectionTypesByUri.set(uriKey, projectionTypes);
 		if (entities.length > 0) {
 			this.entitiesByUri.set(uriKey, entities);
 		} else {
@@ -89,6 +93,7 @@ export class WorkspaceEntityIndex {
 	public removeUri(uri: vscode.Uri): void {
 		const uriKey = uri.toString();
 		this.entitiesByUri.delete(uriKey);
+		this.projectionTypesByUri.delete(uriKey);
 		this.sourceFingerprints.delete(uriKey);
 		this.rebuildNameIndex();
 	}
@@ -104,6 +109,17 @@ export class WorkspaceEntityIndex {
 
 	public getAllEntities(): readonly EntityInfo[] {
 		return [...this.entitiesByUri.values()].flat();
+	}
+
+	public getAllProjectionTypes(): readonly ProjectionTypeInfo[] {
+		const uniqueTypes = new Map<string, ProjectionTypeInfo>();
+		for (const type of [...this.projectionTypesByUri.values()].flat()) {
+			const qualifiedName = type.packageName ? `${type.packageName}.${type.name}` : type.name;
+			if (!uniqueTypes.has(qualifiedName)) {
+				uniqueTypes.set(qualifiedName, type);
+			}
+		}
+		return [...uniqueTypes.values()];
 	}
 
 	public getEntitiesForUri(uri: vscode.Uri): readonly EntityInfo[] {
@@ -128,7 +144,9 @@ export class WorkspaceEntityIndex {
 					const uriKey = uri.toString();
 					const fingerprint = sourceFingerprint(text);
 					this.sourceFingerprints.set(uriKey, fingerprint);
-					const entities = parseEntityModels(text, uri);
+					const projectionTypes: ProjectionTypeInfo[] = [];
+					const entities = parseEntityModels(text, uri, projectionTypes);
+					this.projectionTypesByUri.set(uriKey, projectionTypes);
 					if (entities.length > 0) {
 						this.entitiesByUri.set(uriKey, entities);
 					}

@@ -4,6 +4,25 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.0.4] - 2026-10-16
+
+### Added
+
+- **JPQL conditional expressions** — `CASE`, `WHEN`, `THEN`, `ELSE`, `END` are now first-class citizens of the JPQL language support:
+  - **Autocomplete**: typing `CA` suggests a ready-to-use `CASE … END` snippet with tabstops (`CASE WHEN ${condition} THEN ${result} ELSE ${default} END`).
+  - **Syntax highlighting**: CASE-expression keywords receive the dedicated `keyword.control.conditional.jpql` TextMate scope so themes can colour them distinctly from structural clauses.
+  - **Hover documentation**: hovering any keyword inside a CASE block (`CASE`, `WHEN`, `THEN`, `ELSE`, `END`) highlights the full expression and shows the documentation for the hovered keyword.
+- **`COALESCE` and `NULLIF`** — two JPQL conditional functions added to completion (with `Function` icon and argument-tabstop snippets), hover docs, and syntax highlighting.
+- **`NEW`** — constructor DTO projection keyword (`SELECT NEW com.example.Dto(…)`) is now highlighted as a clause and documented on hover.
+- **`ESCAPE`** — LIKE escape-character clause added to completion and hover docs.
+- **`DISTINCT`** — already in autocomplete; now also highlighted in the syntax grammar.
+- **Rich keyword documentation in autocomplete** — all JPQL keywords, functions, and conditional keywords now display their syntax and a practical example directly in the completion popup, not just as a hover tooltip.
+
+### Fixed
+
+- **`@Param` quick-fix inserted at the wrong position** — the `Add '@Param("…")'` quick-fix previously inserted the annotation *after* the type (`String @Param("email") email`) instead of *before* it. It now correctly produces `@Param("email") String email`. Root cause: the diagnostic range used the parameter-name offset; it now uses the start of the full parameter text (`typeStartOffset`).
+- **`@Param` quick-fix only fixed the first missing annotation** — a new **"Add all N missing '@Param' annotations"** action is offered whenever multiple parameters on the same method are missing `@Param`. All insertions are applied in a single edit (right-to-left to preserve offsets), resolving all warnings at once.
+
 ## [1.0.3] - 2026-10-15
 
 ### Added

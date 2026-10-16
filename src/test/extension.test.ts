@@ -254,7 +254,7 @@ suite('Extension Test Suite', () => {
 
 	test('extracts and indexes multiple top-level JPA types from one Java file', () => {
 		const uri = vscode.Uri.parse('file:///models/Types.java');
-		const source = 'package models; @Entity class User { String email; } @Embeddable class Address { String city; }';
+		const source = 'package models; @Entity class User { String email; } @Embeddable class Address { String city; } class UserView {}';
 		const parsed = parseEntityModelsAst(source, uri);
 		assert.deepStrictEqual(parsed.map((entity) => entity.name), ['User', 'Address']);
 		assert.strictEqual(parsed[0].isEntity, true);
@@ -266,8 +266,20 @@ suite('Extension Test Suite', () => {
 		const document = { languageId: 'java', uri, getText: () => source } as vscode.TextDocument;
 		index.updateDocument(document);
 		assert.deepStrictEqual(index.getAllEntities().map((entity) => entity.name), ['User', 'Address']);
+		assert.deepStrictEqual(index.getAllProjectionTypes().map((type) => type.name), ['User', 'Address', 'UserView']);
 		index.removeUri(uri);
 		assert.strictEqual(index.getAllEntities().length, 0);
+		assert.strictEqual(index.getAllProjectionTypes().length, 0);
+
+		const dtoUri = vscode.Uri.parse('file:///dto/BookResponse.java');
+		index.updateDocument({
+			languageId: 'java',
+			uri: dtoUri,
+			getText: () => 'package models; class BookResponse {}',
+		} as any);
+		assert.deepStrictEqual(index.getAllProjectionTypes().map((type) => type.name), ['BookResponse']);
+		index.removeUri(dtoUri);
+		assert.strictEqual(index.getAllProjectionTypes().length, 0);
 	});
 
 	test('falls back to the base parser for incomplete Java source', () => {
@@ -848,6 +860,32 @@ suite('Extension Test Suite', () => {
 		assert.ok(dtoCompletion);
 		assert.strictEqual(dtoCompletion?.insertText, 'com.example.UserView');
 		assert.strictEqual((dtoCompletion?.range as vscode.Range | undefined)?.start.character, text.indexOf('com.example.UserV'));
+	});
+
+	test('completes ordinary classes and interfaces with fully qualified names after JPQL SELECT NEW', () => {
+		const uri = vscode.Uri.parse('file:///dto/ProjectionTypes.java');
+		const projectionTypes = [] as import('../entityModel').ProjectionTypeInfo[];
+		const parsed = parseEntityModels(
+			'package com.example.dto; class BookResponse {} interface BookView { String getTitle(); }',
+			uri,
+			projectionTypes,
+		);
+		assert.deepStrictEqual(parsed.map((type) => type.name), ['BookView']);
+		assert.deepStrictEqual(projectionTypes.map((type) => [type.name, type.packageName, type.kind]), [
+			['BookResponse', 'com.example.dto', 'class'],
+			['BookView', 'com.example.dto', 'interface'],
+		]);
+
+		const text = '@Query("SELECT NEW BookR FROM Book b") List<BookResponse> find();';
+		const document = {
+			getText: () => text,
+			lineAt: () => ({ text }),
+			offsetAt: (position: vscode.Position) => position.character,
+		} as any;
+		const position = new vscode.Position(0, text.indexOf('BookR') + 'BookR'.length);
+		const completions = createJpqlCompletions(document, position, [], 'generic', projectionTypes);
+		const completion = completions?.find((item) => item.label === 'BookResponse');
+		assert.strictEqual(completion?.insertText, 'com.example.dto.BookResponse');
 	});
 
 	test('resolves inherited and nested JPQL properties', () => {
