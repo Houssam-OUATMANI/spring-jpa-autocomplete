@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { EntityInfo } from '../entityModel';
 import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy, resolveEntityPropertyPath } from '../entityDiscovery';
 import { extractAllJpqlQueries } from './jpqlParser';
-import { JPQL_KEYWORDS } from './jpqlLanguage';
+import { JPQL_KEYWORDS, JPQL_CONDITIONAL, JPQL_FUNCTIONS } from './jpqlLanguage';
+import { getJpqlDocumentation } from './jpqlDocumentation';
 import { createNativeSqlCompletions } from './nativeSqlCompletion';
 import { SqlDialect } from './sqlDialect';
 
@@ -169,15 +170,64 @@ export function createJpqlCompletions(
 		return items;
 	}
 
-	// 4. General JPQL keywords
+	// 4. General JPQL keywords + conditional snippets
 	const lastWordMatch = linePrefix.match(/[A-Za-z_]+$/);
 	const lastWord = lastWordMatch ? lastWordMatch[0] : '';
 	if (lastWord.length > 0) {
 		const wordRange = new vscode.Range(new vscode.Position(position.line, position.character - lastWord.length), position);
+
+		// 4a. CASE expression snippet — expands to a full CASE…WHEN…THEN…ELSE…END template
+		if ('CASE'.toLowerCase().startsWith(lastWord.toLowerCase())) {
+			const caseSnippet = new vscode.CompletionItem('CASE … END', vscode.CompletionItemKind.Snippet);
+			caseSnippet.insertText = new vscode.SnippetString('CASE WHEN ${1:condition} THEN ${2:result} ELSE ${3:default} END');
+			caseSnippet.detail = 'JPQL conditional expression';
+			caseSnippet.documentation = new vscode.MarkdownString(
+				'**JPQL Conditional** — searched CASE expression\n\n'
+				+ '```jpql\nCASE WHEN condition THEN result [WHEN … THEN …] [ELSE default] END\n```',
+			);
+			caseSnippet.sortText = '1_CASE';
+			caseSnippet.range = wordRange;
+			items.push(caseSnippet);
+		}
+
+		// 4b. COALESCE / NULLIF snippets
+		for (const fn of ['COALESCE', 'NULLIF'] as const) {
+			if (fn.toLowerCase().startsWith(lastWord.toLowerCase())) {
+				const doc = getJpqlDocumentation(fn);
+				const snippet = new vscode.CompletionItem(fn, vscode.CompletionItemKind.Function);
+				snippet.insertText = fn === 'COALESCE'
+					? new vscode.SnippetString('COALESCE(${1:expression1}, ${2:expression2})')
+					: new vscode.SnippetString('NULLIF(${1:expression1}, ${2:expression2})');
+				snippet.detail = `JPQL Function: ${fn}`;
+				if (doc) {
+					snippet.documentation = new vscode.MarkdownString(
+						`**JPQL Function**\n\n### ${fn}\n${doc.description}\n\n**Syntaxe**\n\`${doc.syntax}\`\n\n**Exemple**\n\`${doc.useCase}\``,
+					);
+				}
+				snippet.sortText = `1_${fn}`;
+				snippet.range = wordRange;
+				items.push(snippet);
+			}
+		}
+
+		// 4c. All other JPQL keywords (clauses, operators, functions, conditional tokens)
 		for (const kw of JPQL_KEYWORDS) {
+			// Skip keywords already handled above as rich snippets
+			if (['CASE', 'COALESCE', 'NULLIF'].includes(kw)) {
+				continue;
+			}
 			if (kw.toLowerCase().startsWith(lastWord.toLowerCase())) {
-				const item = new vscode.CompletionItem(kw, vscode.CompletionItemKind.Keyword);
-				item.detail = `JPQL keyword: ${kw}`;
+				const isConditional = (JPQL_CONDITIONAL as readonly string[]).includes(kw);
+				const isFunction = (JPQL_FUNCTIONS as readonly string[]).includes(kw);
+				const kind = isFunction ? vscode.CompletionItemKind.Function : vscode.CompletionItemKind.Keyword;
+				const item = new vscode.CompletionItem(kw, kind);
+				item.detail = isConditional ? `JPQL Conditional: ${kw}` : isFunction ? `JPQL Function: ${kw}` : `JPQL keyword: ${kw}`;
+				const doc = getJpqlDocumentation(kw);
+				if (doc) {
+					item.documentation = new vscode.MarkdownString(
+						`**JPQL ${doc.kind}**\n\n### ${doc.title}\n${doc.description}\n\n**Syntaxe**\n\`${doc.syntax}\`\n\n**Exemple**\n\`${doc.useCase}\``,
+					);
+				}
 				item.sortText = `2_${kw}`;
 				item.range = wordRange;
 				items.push(item);

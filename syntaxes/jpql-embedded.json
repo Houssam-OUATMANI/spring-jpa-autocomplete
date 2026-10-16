@@ -47,7 +47,11 @@
       "patterns": [
         {
           "name": "keyword.control.jpql",
-          "match": "\\b(?:SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|FETCH|GROUP|BY|HAVING|ORDER|ASC|DESC|UPDATE|DELETE|SET|AS)\\b"
+          "match": "\\b(?:SELECT|DISTINCT|FROM|WHERE|JOIN|LEFT|RIGHT|FULL|INNER|OUTER|CROSS|FETCH|GROUP|BY|HAVING|ORDER|ASC|DESC|UPDATE|DELETE|SET|AS|NEW|ESCAPE)\\b"
+        },
+        {
+          "name": "keyword.control.conditional.jpql",
+          "match": "\\b(?:CASE|WHEN|THEN|ELSE|END)\\b"
         },
         {
           "name": "keyword.operator.jpql",
@@ -55,7 +59,12 @@
         },
         {
           "name": "support.function.jpql",
-          "match": "\\b(?:AVG|COUNT|MAX|MIN|SUM|CONCAT|SUBSTRING|LOWER|UPPER|TRIM|LENGTH|LOCATE|REPLACE|LEFT|RIGHT|ABS|MOD|SQRT|CEILING|EXP|FLOOR|LN|POWER|ROUND|SIGN|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|LOCAL_DATE|LOCAL_TIME|LOCAL_DATETIME|EXTRACT|SIZE|INDEX|KEY|VALUE|ENTRY|TYPE|TREAT|FUNCTION)\\b(?=\\s*\\()"
+          "match": "\\b(?:AVG|COUNT|MAX|MIN|SUM|CONCAT|SUBSTRING|LOWER|UPPER|TRIM|LENGTH|LOCATE|REPLACE|ABS|MOD|SQRT|CEILING|EXP|FLOOR|LN|POWER|ROUND|SIGN|CURRENT_DATE|CURRENT_TIME|CURRENT_TIMESTAMP|LOCAL_DATE|LOCAL_TIME|LOCAL_DATETIME|EXTRACT|SIZE|INDEX|KEY|VALUE|ENTRY|TYPE|TREAT|FUNCTION|COALESCE|NULLIF)\\b(?=\\s*\\()"
+        },
+        {
+          "comment": "LEFT/RIGHT as string functions take priority over their use as JOIN modifiers",
+          "name": "support.function.jpql",
+          "match": "\\b(?:LEFT|RIGHT)\\b(?=\\s*\\()"
         },
         {
           "match": "\\b(FROM|JOIN)\\s+([A-Z][A-Za-z0-9_$]*)",

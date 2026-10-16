@@ -1,8 +1,8 @@
-import { JPQL_CLAUSES, JPQL_FUNCTIONS, JPQL_OPERATORS } from './jpqlLanguage';
+import { JPQL_CLAUSES, JPQL_CONDITIONAL, JPQL_FUNCTIONS, JPQL_OPERATORS } from './jpqlLanguage';
 
 export interface JpqlDocumentation {
   readonly title: string;
-  readonly kind: 'Clause' | 'Operator' | 'Function';
+  readonly kind: 'Clause' | 'Operator' | 'Function' | 'Conditional';
   readonly description: string;
   readonly syntax: string;
   readonly useCase: string;
@@ -258,6 +258,82 @@ const documentation: Readonly<Record<string, JpqlDocumentation>> = {
     syntax: "FUNCTION('name', arg1, arg2, ...)",
     useCase: "SELECT FUNCTION('YEAR', u.createdAt) FROM User u",
   },
+  // ── Conditional functions ──────────────────────────────────────────────────
+  COALESCE: {
+    title: 'COALESCE',
+    kind: 'Function',
+    description:
+      'Returns the first non-null value in the argument list. Equivalent to a nested CASE WHEN … IS NOT NULL THEN … END.',
+    syntax: 'COALESCE(expression1, expression2, ...)',
+    useCase: 'SELECT COALESCE(u.nickname, u.firstName) FROM User u',
+  },
+  NULLIF: {
+    title: 'NULLIF',
+    kind: 'Function',
+    description:
+      'Returns NULL if both arguments are equal, otherwise returns the first argument.',
+    syntax: 'NULLIF(expression1, expression2)',
+    useCase: "WHERE NULLIF(u.status, 'DELETED') IS NOT NULL",
+  },
+  // ── CASE expression keywords ───────────────────────────────────────────────
+  CASE: {
+    title: 'CASE',
+    kind: 'Conditional',
+    description:
+      'Opens a conditional expression. Use the *searched* form (`CASE WHEN condition THEN result … END`) ' +
+      'or the *simple* form (`CASE operand WHEN value THEN result … END`).',
+    syntax: 'CASE WHEN condition THEN result [WHEN … THEN …] [ELSE default] END',
+    useCase: "SELECT CASE WHEN u.age >= 18 THEN 'Adult' ELSE 'Minor' END FROM User u",
+  },
+  WHEN: {
+    title: 'WHEN',
+    kind: 'Conditional',
+    description:
+      'Introduces a condition branch inside a CASE expression. Branches are evaluated in order; the first match is used.',
+    syntax: 'WHEN condition THEN result',
+    useCase:
+      "CASE WHEN o.total > 1000 THEN 'Premium' WHEN o.total > 500 THEN 'Regular' ELSE 'Basic' END",
+  },
+  THEN: {
+    title: 'THEN',
+    kind: 'Conditional',
+    description:
+      'Specifies the value returned when the preceding WHEN condition evaluates to true.',
+    syntax: 'WHEN condition THEN result',
+    useCase: "CASE WHEN u.active = true THEN 'Active' ELSE 'Inactive' END",
+  },
+  ELSE: {
+    title: 'ELSE',
+    kind: 'Conditional',
+    description:
+      'Optional default branch of a CASE expression, returned when no WHEN condition matched. Without ELSE, unmatched cases return NULL.',
+    syntax: 'ELSE default_value',
+    useCase: "CASE WHEN u.role = 'ADMIN' THEN 'Administrator' ELSE 'User' END",
+  },
+  END: {
+    title: 'END',
+    kind: 'Conditional',
+    description: 'Closes a CASE expression.',
+    syntax: 'CASE … END',
+    useCase: "CASE WHEN u.age >= 18 THEN 'Adult' ELSE 'Minor' END",
+  },
+  // ── Other structural keywords ──────────────────────────────────────────────
+  NEW: {
+    title: 'NEW',
+    kind: 'Clause',
+    description:
+      'Invokes a constructor projection: maps each result row directly to a DTO instance using its constructor.',
+    syntax: 'SELECT NEW com.example.dto.MyDto(alias.field1, alias.field2) FROM Entity alias',
+    useCase: 'SELECT NEW com.example.dto.UserSummary(u.id, u.name) FROM User u',
+  },
+  ESCAPE: {
+    title: 'ESCAPE',
+    kind: 'Operator',
+    description:
+      "Defines the escape character for a LIKE pattern so that `%` and `_` wildcards can be treated as literals.",
+    syntax: "expression LIKE pattern ESCAPE 'character'",
+    useCase: "WHERE u.code LIKE '50!%' ESCAPE '!'",
+  },
 };
 
 export function getJpqlDocumentation(
@@ -299,6 +375,14 @@ export function getJpqlDocumentation(
       'Function',
       `JPQL function ${normalized}.`,
       `${normalized}(expression)`,
+    );
+  }
+  if (JPQL_CONDITIONAL.includes(normalized as (typeof JPQL_CONDITIONAL)[number])) {
+    return createFallbackDocumentation(
+      normalized,
+      'Conditional',
+      `JPQL conditional keyword ${normalized}.`,
+      normalized,
     );
   }
   return undefined;

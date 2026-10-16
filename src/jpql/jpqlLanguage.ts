@@ -17,8 +17,29 @@ export const JPQL_FUNCTIONS = [
 	'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'LOCAL DATE', 'LOCAL TIME', 'LOCAL DATETIME', 'EXTRACT',
 	'SIZE', 'INDEX', 'KEY', 'VALUE', 'ENTRY',
 	'TYPE', 'TREAT', 'FUNCTION',
+	// Conditional functions
+	'COALESCE', 'NULLIF',
 ] as const;
 
-export const JPQL_KEYWORDS = [...JPQL_CLAUSES, ...JPQL_OPERATORS, 'DISTINCT', ...JPQL_FUNCTIONS] as const;
+/**
+ * JPQL conditional-expression keywords (CASE expression and related).
+ * These are standalone keywords, not functions, and cannot appear as identifiers.
+ */
+export const JPQL_CONDITIONAL = [
+	'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+	// DTO constructor expression
+	'NEW',
+	// LIKE escape clause
+	'ESCAPE',
+] as const;
+
+export const JPQL_KEYWORDS = [
+	...JPQL_CLAUSES,
+	...JPQL_OPERATORS,
+	'DISTINCT',
+	...JPQL_FUNCTIONS,
+	...JPQL_CONDITIONAL,
+] as const;
 
 export type JpqlFunctionName = typeof JPQL_FUNCTIONS[number];
+export type JpqlConditionalKeyword = typeof JPQL_CONDITIONAL[number];

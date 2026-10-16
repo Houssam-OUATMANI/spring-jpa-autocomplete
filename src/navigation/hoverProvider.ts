@@ -61,11 +61,32 @@ function findCompoundJpqlDocumentation(
 	queryStartOffset: number,
 	documentOffset: number,
 ): { documentation: ReturnType<typeof getJpqlDocumentation>; startOffset: number; endOffset: number } | undefined {
+	// Multi-word JOIN variants (LEFT OUTER JOIN, INNER JOIN, etc.)
 	for (const match of queryContent.matchAll(/\b(LEFT(?:\s+OUTER)?|INNER|RIGHT|FULL|CROSS)\s+JOIN\b/gi)) {
 		const startOffset = queryStartOffset + (match.index ?? 0);
 		const endOffset = startOffset + match[0].length;
 		if (documentOffset >= startOffset && documentOffset <= endOffset) {
 			return { documentation: getJpqlDocumentation(match[0]), startOffset, endOffset };
+		}
+	}
+	// CASE … END: highlight the full block when hovering any of its keywords
+	const casePattern = /\bCASE\b[\s\S]*?\bEND\b/gi;
+	for (const match of queryContent.matchAll(casePattern)) {
+		const blockStart = queryStartOffset + (match.index ?? 0);
+		const blockEnd = blockStart + match[0].length;
+		if (documentOffset < blockStart || documentOffset > blockEnd) {
+			continue;
+		}
+		// Find the exact keyword the cursor is on within the block
+		const relativeOffset = documentOffset - blockStart;
+		const kwPattern = /\b(CASE|WHEN|THEN|ELSE|END)\b/gi;
+		for (const kw of match[0].matchAll(kwPattern)) {
+			const kwStart = blockStart + (kw.index ?? 0);
+			const kwEnd = kwStart + kw[0].length;
+			if (documentOffset >= kwStart && documentOffset <= kwEnd) {
+				return { documentation: getJpqlDocumentation(kw[1]), startOffset: blockStart, endOffset: blockEnd };
+			}
+			void relativeOffset; // consumed above
 		}
 	}
 	return undefined;
