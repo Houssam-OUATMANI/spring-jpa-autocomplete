@@ -46,6 +46,15 @@ List<Order> findByCustomerEmail(@Param("email") String email);
 
 The unknown `emial` property gets a diagnostic and, when a close match exists, a rename fix. Complete after `c.` to see `Customer` properties; use `F12` on a property or parameter to navigate to its declaration.
 
+For constructor projections, completion after `SELECT NEW` finds DTO classes, records, and interfaces in the workspace and inserts the fully qualified type name:
+
+```java
+@Query("SELECT NEW com.example.dto.BookResponse(b.title) FROM Book b")
+List<BookResponse> findBookResponses();
+```
+
+Start typing the DTO's simple name after `NEW`, then accept the suggestion to insert its package-qualified name.
+
 ### Fix every missing argument in one action
 
 ```java
@@ -73,7 +82,7 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 - **Completion ordering**: entity properties are displayed before operators and keywords.
 - **Entity & Property model**:
   - Grammar-based Java syntax-tree parsing for entity declarations, fields, annotations, records, and projections, with the existing parser retained as a fallback for incomplete source while typing.
-  - Indexes multiple top-level JPA types declared in the same Java source file.
+  - Indexes multiple top-level JPA types declared in the same Java source file and discovers Java classes, records, and interfaces for JPQL DTO projection completion.
   - Support for `@Entity`, `@MappedSuperclass` inheritance, `@Embeddable`, and Java records.
   - JPA entity names (`@Entity(name = ...)`), physical table names (`@Table`), and physical column names (`@Column` / `@JoinColumn`).
   - Support for Spring Data projection interfaces based on `getX()`, `isX()`, and `hasX()` accessors.
@@ -151,7 +160,7 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 - **Index and performance controls**:
   - Run `Spring JPA: Rebuild Entity Index` after changing project structure.
   - Configure `springJpa.diagnosticDebounceMs`, `springJpa.enablePerformanceDiagnostics`, `springJpa.includeTestSources`, and `springJpa.enableCodeLens` in VS Code settings.
-  - Indexing skips Java files without JPA entity annotations, records, or projection interfaces, and excludes generated build and VS Code test-cache directories consistently across initial scans, file changes, and diagnostics. Set `springJpa.includeTestSources` to `false` to exclude `src/test`.
+  - Entity-model indexing excludes Java files without JPA entity annotations, records, or projection interfaces. A separate workspace type index discovers declarations for DTO projection completion; both indexes exclude generated build and VS Code test-cache directories consistently. Set `springJpa.includeTestSources` to `false` to exclude `src/test`.
   - Completion requests use the entities already indexed instead of waiting for the full workspace scan; the scan runs in small batches and yields between batches so it does not monopolize the extension host.
   - Configure `springJpa.diagnostics.derivedQueries` and `springJpa.diagnostics.jpql` independently with `all`, `errors`, `warnings`, or `off`.
 - **Incremental Indexing**: Fast in-memory cache synchronized with `vscode.workspace.createFileSystemWatcher`.

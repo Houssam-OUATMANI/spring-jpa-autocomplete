@@ -14,6 +14,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
   - **Hover documentation**: hovering any keyword inside a CASE block (`CASE`, `WHEN`, `THEN`, `ELSE`, `END`) highlights the full expression and shows the documentation for the hovered keyword.
 - **`COALESCE` and `NULLIF`** — two JPQL conditional functions added to completion (with `Function` icon and argument-tabstop snippets), hover docs, and syntax highlighting.
 - **`NEW`** — constructor DTO projection keyword (`SELECT NEW com.example.Dto(…)`) is now highlighted as a clause and documented on hover.
+- **DTO projection type completion** — after `SELECT NEW`, completion discovers workspace Java classes, records, and interfaces and inserts the fully qualified name, avoiding manual package entry.
 - **`ESCAPE`** — LIKE escape-character clause added to completion and hover docs.
 - **`DISTINCT`** — already in autocomplete; now also highlighted in the syntax grammar.
 - **Rich keyword documentation in autocomplete** — all JPQL keywords, functions, and conditional keywords now display their syntax and a practical example directly in the completion popup, not just as a hover tooltip.
