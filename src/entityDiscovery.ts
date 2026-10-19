@@ -392,8 +392,30 @@ function addEntityProperties(
 	}
 }
 
+export const COMMON_NON_ENTITY_TYPES = new Set([
+	'string', 'long', 'integer', 'int', 'boolean', 'double', 'float', 'byte', 'short', 'char', 'character',
+	'bigdecimal', 'biginteger', 'uuid', 'date', 'localdate', 'localdatetime', 'localtime', 'instant',
+	'zoneddatetime', 'offsetdatetime', 'duration', 'list', 'set', 'collection', 'iterable', 'map',
+	'optional', 'page', 'slice', 'stream', 'void', 'object',
+	'arraylist', 'hashset', 'treeset', 'linkedhashset', 'linkedlist', 'vector',
+]);
+
+export function findEntityByName(entitiesByName: ReadonlyMap<string, EntityInfo>, name: string): EntityInfo | undefined {
+	const key = name.toLowerCase();
+	if (COMMON_NON_ENTITY_TYPES.has(key)) {
+		return undefined;
+	}
+	const direct = entitiesByName.get(key);
+	if (direct) {
+		return direct;
+	}
+	return entitiesByName.get(name);
+}
+
 export function referencedEntityNames(type: string): string[] {
-	return [...type.matchAll(/\b[A-Z]\w*\b/g)].map((match) => match[0]);
+	return [...type.matchAll(/\b[A-Z]\w*\b/g)]
+		.map((match) => match[0])
+		.filter((name) => !COMMON_NON_ENTITY_TYPES.has(name.toLowerCase()));
 }
 
 export function resolveEntityPropertyPath(
@@ -427,25 +449,6 @@ export function resolveEntityPropertyPathWithOwner(
 	}
 
 	return resolved && owner ? { property: resolved, owner } : undefined;
-}
-
-const COMMON_NON_ENTITY_TYPES = new Set([
-	'string', 'long', 'integer', 'int', 'boolean', 'double', 'float', 'byte', 'short', 'char', 'character',
-	'bigdecimal', 'biginteger', 'uuid', 'date', 'localdate', 'localdatetime', 'localtime', 'instant',
-	'zoneddatetime', 'offsetdatetime', 'duration', 'list', 'set', 'collection', 'iterable', 'map',
-	'optional', 'page', 'slice', 'stream', 'void', 'object',
-]);
-
-function findEntityByName(entitiesByName: ReadonlyMap<string, EntityInfo>, name: string): EntityInfo | undefined {
-	const key = name.toLowerCase();
-	if (COMMON_NON_ENTITY_TYPES.has(key)) {
-		return undefined;
-	}
-	const direct = entitiesByName.get(key);
-	if (direct) {
-		return direct;
-	}
-	return entitiesByName.get(name);
 }
 
 function capitalize(value: string): string {

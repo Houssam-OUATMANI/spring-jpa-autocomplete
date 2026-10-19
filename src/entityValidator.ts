@@ -1,5 +1,5 @@
 import { EntityInfo } from './entityModel';
-import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy } from './entityDiscovery';
+import { createEntityLookup, findEntityByName, referencedEntityNames, resolveEntityHierarchy } from './entityDiscovery';
 import { findClosestProperty } from './propertySuggestions';
 
 export interface EntityDiagnostic {
@@ -70,8 +70,8 @@ export function validateJpaEntities(
 		for (const prop of entity.properties) {
 			if (prop.mappedBy) {
 				const targetEntityName = prop.targetEntity
-					?? referencedEntityNames(prop.type).find((name) => entityLookup.has(name.toLowerCase()));
-				const targetEntity = targetEntityName ? entityLookup.get(targetEntityName.toLowerCase()) : undefined;
+					?? referencedEntityNames(prop.type).find((name) => findEntityByName(entityLookup, name) !== undefined);
+				const targetEntity = targetEntityName ? findEntityByName(entityLookup, targetEntityName) : undefined;
 
 				if (targetEntity) {
 					const resolvedTarget = resolveEntityHierarchy(targetEntity, entityLookup);

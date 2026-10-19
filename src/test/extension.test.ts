@@ -1629,4 +1629,55 @@ public class Book {
 		assert.ok(propNames.includes('price'), `findByPrice should work — price must be in props: ${propNames.join(',')}`);
 		assert.ok(propNames.includes('title'), 'findByTitle should work');
 	});
+
+	test('validateJpql does not report unknown entity on JOIN FETCH association path', () => {
+		const userEntity = {
+			name: 'User',
+			uri: vscode.Uri.parse('file:///User.java'),
+			isEntity: true as const,
+			properties: [
+				{ name: 'id', type: 'UUID', isId: true as const },
+				{ name: 'books', type: 'List<Book>', relation: 'OneToMany' as const },
+			],
+		};
+		const queries = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u LEFT JOIN FETCH u.books WHERE u.id = :id") Optional<User> findByIdWithBooks(@Param("id") UUID id);',
+			[userEntity],
+		);
+		assert.strictEqual(queries.length, 1);
+		const diags = validateJpql(queries[0], [userEntity]);
+		const unknownEntities = diags.filter((d) => d.code === 'UNKNOWN_ENTITY');
+		assert.strictEqual(unknownEntities.length, 0, 'Should not report u as an unknown JPA entity');
+	});
+
+	test('validateJpaEntities resolves Book as target entity for List<Book> books even if a List entity exists', () => {
+		const listEntity = {
+			name: 'List',
+			uri: vscode.Uri.parse('file:///List.java'),
+			isEntity: true as const,
+			properties: [{ name: 'id', type: 'Long', isId: true as const }],
+		};
+		const bookEntity = {
+			name: 'Book',
+			uri: vscode.Uri.parse('file:///Book.java'),
+			isEntity: true as const,
+			properties: [
+				{ name: 'id', type: 'UUID', isId: true as const },
+				{ name: 'user', type: 'User' },
+			],
+		};
+		const userEntity = {
+			name: 'User',
+			uri: vscode.Uri.parse('file:///User.java'),
+			isEntity: true as const,
+			properties: [
+				{ name: 'id', type: 'UUID', isId: true as const },
+				{ name: 'books', type: 'List<Book>', relation: 'OneToMany' as const, mappedBy: 'user' },
+			],
+		};
+		const diags = validateJpaEntities([userEntity], [listEntity, bookEntity, userEntity], '');
+		const mappedByErrors = diags.filter((d) => d.code === 'INVALID_MAPPED_BY');
+		assert.strictEqual(mappedByErrors.length, 0, 'Target attribute user exists in Book, must not resolve to List');
+	});
 });
+

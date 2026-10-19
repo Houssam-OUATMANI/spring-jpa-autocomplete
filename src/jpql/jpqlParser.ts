@@ -379,12 +379,19 @@ function extractPositionalParameters(query: string, sourceOffsetAt: (index: numb
 	return results;
 }
 
+const JPQL_NON_ENTITY_KEYWORDS = new Set([
+	'WHERE', 'SET', 'HAVING', 'GROUP', 'ORDER', 'SELECT', 'FETCH', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL', 'CROSS', 'ON', 'IN', 'AS', 'UPDATE', 'DELETE', 'FROM'
+]);
+
 function extractReferencedEntities(query: string, sourceOffsetAt: (index: number) => number): { name: string; startOffset: number; endOffset: number }[] {
 	const results: { name: string; startOffset: number; endOffset: number }[] = [];
-	const regex = /\b(?:FROM|JOIN)\s+(?:FETCH\s+)?([A-Z]\w*)\b/gi;
+	const regex = /\b(?:FROM|JOIN|UPDATE)\s+(?!FETCH\b)([A-Za-z_$]\w*)\b(?!\s*\.)/gi;
 	let match: RegExpExecArray | null;
 	while ((match = regex.exec(query)) !== null) {
 		const name = match[1];
+		if (JPQL_NON_ENTITY_KEYWORDS.has(name.toUpperCase())) {
+			continue;
+		}
 		const nameOffset = match.index + match[0].lastIndexOf(name);
 		results.push({
 			name,

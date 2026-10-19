@@ -12,7 +12,7 @@ import { SpringJpaHoverProvider } from './navigation/hoverProvider';
 import { SpringJpaCodeLensProvider } from './navigation/codeLensProvider';
 import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
-import { parseJavaParameters } from './javaParsing';
+import { maskJavaSource, parseJavaParameters } from './javaParsing';
 import { resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
 import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
@@ -403,6 +403,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const entities = await discoverEntities(document);
 
 		if (isRepo) {
+			const maskedDocText = maskJavaSource(docText);
 			// A. Derived Query Methods Diagnostics (Validation of signature, return types, parameters, properties)
 			const methodRegex = /\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*(?:throws\s+[\w$.,\s]+)?;/g;
 			let methodMatch: RegExpExecArray | null;
@@ -412,11 +413,21 @@ export function activate(context: vscode.ExtensionContext) {
 			const propertiesByEntity = new Map<string | undefined, ReturnType<typeof findEntityProperties>>();
 
 			while ((methodMatch = methodRegex.exec(docText)) !== null) {
+				const startOffset = methodMatch.index;
+				const prevDelim = Math.max(
+					maskedDocText.lastIndexOf(';', startOffset),
+					maskedDocText.lastIndexOf('{', startOffset),
+					maskedDocText.lastIndexOf('}', startOffset),
+				);
+				const methodPrefix = docText.slice(prevDelim >= 0 ? prevDelim : 0, startOffset);
+				if (/@(?:[\w$]+\.)*(?:Query|NativeQuery|Procedure)\b/.test(methodPrefix)) {
+					continue;
+				}
+
 				const fullText = methodMatch[0];
 				const returnType = methodMatch[1].trim();
 				const methodName = methodMatch[2];
 				const paramsText = methodMatch[3];
-				const startOffset = methodMatch.index;
 				const endOffset = methodMatch.index + fullText.length;
 				const repositoryEntityName = extractRepositoryEntityNameAt(docText, startOffset);
 

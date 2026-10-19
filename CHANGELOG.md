@@ -4,6 +4,14 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **False positive `Unknown JPA entity` on `JOIN FETCH` and association paths** — `LEFT JOIN FETCH u.books` or `JOIN u.books b` in JPQL `@Query` was mistakenly matching the alias `u` as an entity name due to case-insensitivity and word boundaries around the dot. Path joins and fetch joins are now correctly recognized as association navigation rather than standalone entity references.
+- **False positive derived query errors on methods with `@Query`** — Methods such as `Optional<User> findByIdWithBooks(...)` annotated with `@Query` or `@NativeQuery` were being validated as derived query methods and failing with *"Unknown entity property 'IdWithBooks'"*. The validator now skips derived query validation when `@Query`, `@NativeQuery`, or `@Procedure` is present on the method.
+- **False positive `Target attribute does not exist in entity 'List'` on `@OneToMany` collections** — When resolving the target entity of collection fields such as `private List<Book> books = new ArrayList<>();`, common collection container types (`List`, `Set`, `Collection`, `Map`, etc.) are now filtered out, ensuring the generic entity argument (`Book`) is resolved as the relation target.
+
 ## [1.0.4] - 2026-10-16
 
 ### Added
