@@ -4,6 +4,22 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [1.0.6] - 2026-10-20
+
+### Added
+
+- **JPQL unknown alias diagnostics (`UNKNOWN_ALIAS`)** — The JPQL query validator now verifies that identification variables / aliases used in `SELECT <alias>`, `JOIN [FETCH] <alias>.<property>`, and `WHERE <alias>.<property>` correspond to an entity alias declared in `FROM` or `JOIN`. When an alias mismatch occurs (e.g. `SELECT u FROM User u1 LEFT JOIN FETCH u.books WHERE u.id = :id`), each unknown alias occurrence receives an explicit error diagnostic with a suggestion for the closest declared alias (*"Unknown alias 'u'. Did you mean 'u1'?"*).
+- **Quick-Fixes for JPQL alias mistakes**:
+  - **"Change alias to '...'"** — A one-click Quick-Fix (`Alt+Enter`) replaces the unresolved alias with the declared alias.
+  - **"Change all N occurrences of alias to '...'"** — A batch Quick-Fix that replaces all matching unresolved alias references across the query in a single action.
+- **Quick-Fix support for JPQL `UNKNOWN_PROPERTY`** — The *"Rename property to '...' "* Quick-Fix is now available for misspelled entity properties in `@Query` JPQL queries.
+- **Alias support for `UPDATE` queries** — JPQL queries starting with `UPDATE Entity [AS] alias` now properly resolve the root entity alias.
+
+### Fixed
+
+- **Accidental alias capture of JPQL clause keywords** — Clause keywords such as `WHERE`, `ORDER BY`, or `JOIN` immediately following an entity or path without an explicit alias are no longer incorrectly captured as entity aliases.
+- **False-positive property checks on string literals and DTO constructor paths** — String literals containing dots and `NEW com.example.dto.Type(...)` constructor paths are now masked during property access extraction, preventing spurious diagnostics on DTO package names or text constants.
+
 ## [1.0.5] - 2026-10-19
 
 ### Fixed

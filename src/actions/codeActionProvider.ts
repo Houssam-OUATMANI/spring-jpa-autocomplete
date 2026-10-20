@@ -7,6 +7,8 @@ interface SpringJpaDiagnostic extends vscode.Diagnostic {
 	missingParam?: { name: string; type: string };
 	missingParams?: readonly { name: string; type: string }[];
 	suggestedProperty?: string;
+	suggestedAlias?: string;
+	unknownAlias?: string;
 	expectedReturnType?: string;
 	unknownProperty?: { name: string; targetEntityName?: string; inferredType?: string };
 }
@@ -171,14 +173,50 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						actions.push(action);
 					}
 				}
-			} else if (code === 'UNKNOWN_PROPERTY') {
-				if (springDiagnostic.suggestedProperty) {
+			} else if (code === 'UNKNOWN_ALIAS') {
+				const suggestedAlias = springDiagnostic.suggestedAlias ?? diagnostic.message.match(/Did you mean '([^']+)'\?/)?.[1];
+				if (suggestedAlias) {
 					const action = new vscode.CodeAction(
-						`Rename property to '${springDiagnostic.suggestedProperty}'`,
+						`Change alias to '${suggestedAlias}'`,
 						vscode.CodeActionKind.QuickFix,
 					);
 					action.edit = new vscode.WorkspaceEdit();
-					action.edit.replace(document.uri, diagnostic.range, springDiagnostic.suggestedProperty);
+					action.edit.replace(document.uri, diagnostic.range, suggestedAlias);
+					action.diagnostics = [diagnostic];
+					action.isPreferred = true;
+					actions.push(action);
+
+					// "Fix all" action: fix all UNKNOWN_ALIAS diagnostics on this line or sharing the same suggestedAlias
+					const sameAliasDiags = context.diagnostics.filter(
+						(d) =>
+							d.source === 'spring-jpa'
+							&& (typeof d.code === 'object' ? d.code.value : d.code) === 'UNKNOWN_ALIAS'
+							&& ((d as SpringJpaDiagnostic).suggestedAlias === suggestedAlias
+								|| d.message.includes(`Did you mean '${suggestedAlias}'?`)),
+					);
+					if (sameAliasDiags.length > 1 && sameAliasDiags[0] === diagnostic) {
+						const fixAll = new vscode.CodeAction(
+							`Change all ${sameAliasDiags.length} occurrences of alias to '${suggestedAlias}'`,
+							vscode.CodeActionKind.QuickFix,
+						);
+						fixAll.edit = new vscode.WorkspaceEdit();
+						const sorted = [...sameAliasDiags].sort((a, b) => b.range.start.compareTo(a.range.start));
+						for (const d of sorted) {
+							fixAll.edit.replace(document.uri, d.range, suggestedAlias);
+						}
+						fixAll.diagnostics = [...sameAliasDiags];
+						actions.push(fixAll);
+					}
+				}
+			} else if (code === 'UNKNOWN_PROPERTY') {
+				const suggestedProperty = springDiagnostic.suggestedProperty ?? diagnostic.message.match(/Did you mean '([^']+)'\?/)?.[1];
+				if (suggestedProperty) {
+					const action = new vscode.CodeAction(
+						`Rename property to '${suggestedProperty}'`,
+						vscode.CodeActionKind.QuickFix,
+					);
+					action.edit = new vscode.WorkspaceEdit();
+					action.edit.replace(document.uri, diagnostic.range, suggestedProperty);
 					action.diagnostics = [diagnostic];
 					action.isPreferred = true;
 					actions.push(action);

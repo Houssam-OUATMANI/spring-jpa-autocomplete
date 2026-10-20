@@ -493,6 +493,15 @@ export function activate(context: vscode.ExtensionContext) {
 					const diagnostic = new vscode.Diagnostic(new vscode.Range(start, end), d.message, severity);
 					diagnostic.source = 'spring-jpa';
 					diagnostic.code = d.code;
+					if (d.suggestedProperty) {
+						(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = d.suggestedProperty;
+					}
+					if (d.suggestedAlias) {
+						(diagnostic as vscode.Diagnostic & { suggestedAlias?: string }).suggestedAlias = d.suggestedAlias;
+					}
+					if (d.unknownAlias) {
+						(diagnostic as vscode.Diagnostic & { unknownAlias?: string }).unknownAlias = d.unknownAlias;
+					}
 					documentDiagnostics.push(diagnostic);
 				}
 			}

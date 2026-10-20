@@ -1679,5 +1679,72 @@ public class Book {
 		const mappedByErrors = diags.filter((d) => d.code === 'INVALID_MAPPED_BY');
 		assert.strictEqual(mappedByErrors.length, 0, 'Target attribute user exists in Book, must not resolve to List');
 	});
+
+	test('validateJpql flags unknown aliases and suggests declared alias', () => {
+		const userEntity = {
+			name: 'User',
+			uri: vscode.Uri.parse('file:///User.java'),
+			isEntity: true as const,
+			properties: [
+				{ name: 'id', type: 'UUID', isId: true as const },
+				{ name: 'books', type: 'List<Book>', relation: 'OneToMany' as const },
+			],
+		};
+		const queries = extractAllJpqlQueries(
+			'@Query("SELECT u FROM User u1 LEFT JOIN FETCH u.books WHERE u.id = :id") Optional<User> findByIdWithBooks(@Param("id") UUID id);',
+			[userEntity],
+		);
+		assert.strictEqual(queries.length, 1);
+		const diags = validateJpql(queries[0], [userEntity]);
+		const unknownAliasDiags = diags.filter((d) => d.code === 'UNKNOWN_ALIAS');
+		assert.strictEqual(unknownAliasDiags.length, 3, 'Should report UNKNOWN_ALIAS for SELECT u, u.books, and u.id');
+		for (const diag of unknownAliasDiags) {
+			assert.strictEqual(diag.unknownAlias, 'u');
+			assert.strictEqual(diag.suggestedAlias, 'u1');
+			assert.ok(diag.message.includes("Unknown alias 'u'. Did you mean 'u1'?"));
+		}
+	});
+
+	test('SpringJpaCodeActionProvider generates Quick-Fix to change unknown alias to declared alias', () => {
+		const provider = new SpringJpaCodeActionProvider();
+		const doc = {
+			uri: vscode.Uri.parse('file:///UserRepository.java'),
+			lineAt: () => ({ text: '@Query("SELECT u FROM User u1 LEFT JOIN FETCH u.books WHERE u.id = :id")' }),
+		} as any;
+
+		const d1 = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 15), new vscode.Position(0, 16)),
+			"Unknown alias 'u'. Did you mean 'u1'?",
+			vscode.DiagnosticSeverity.Error,
+		) as vscode.Diagnostic & { suggestedAlias: string; unknownAlias: string };
+		d1.source = 'spring-jpa';
+		d1.code = 'UNKNOWN_ALIAS';
+		d1.suggestedAlias = 'u1';
+		d1.unknownAlias = 'u';
+
+		const d2 = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 46), new vscode.Position(0, 47)),
+			"Unknown alias 'u'. Did you mean 'u1'?",
+			vscode.DiagnosticSeverity.Error,
+		) as vscode.Diagnostic & { suggestedAlias: string; unknownAlias: string };
+		d2.source = 'spring-jpa';
+		d2.code = 'UNKNOWN_ALIAS';
+		d2.suggestedAlias = 'u1';
+		d2.unknownAlias = 'u';
+
+		const d3 = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 60), new vscode.Position(0, 61)),
+			"Unknown alias 'u'. Did you mean 'u1'?",
+			vscode.DiagnosticSeverity.Error,
+		) as vscode.Diagnostic & { suggestedAlias: string; unknownAlias: string };
+		d3.source = 'spring-jpa';
+		d3.code = 'UNKNOWN_ALIAS';
+		d3.suggestedAlias = 'u1';
+		d3.unknownAlias = 'u';
+
+		const actions = provider.provideCodeActions(doc, d1.range, { diagnostics: [d1, d2, d3] } as any, {} as any);
+		assert.ok(actions.some((a) => a.title === "Change alias to 'u1'"));
+		assert.ok(actions.some((a) => a.title === "Change all 3 occurrences of alias to 'u1'"));
+	});
 });
 

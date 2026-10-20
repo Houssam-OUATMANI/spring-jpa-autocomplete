@@ -8,8 +8,11 @@ export interface JpqlDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE' | 'MISSING_MODIFYING_ANNOTATION';
+	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'UNKNOWN_ALIAS' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE' | 'MISSING_MODIFYING_ANNOTATION';
 	readonly paramName?: string;
+	readonly suggestedProperty?: string;
+	readonly suggestedAlias?: string;
+	readonly unknownAlias?: string;
 }
 
 export function validateJpql(
@@ -34,7 +37,7 @@ export function validateJpql(
 		}
 	}
 
-	// 2. Validate property accesses on aliases: alias.property
+	// 2. Validate selected alias and property accesses on aliases: alias.property
 	if (!queryInfo.isNative) {
 		validateReturnType(queryInfo, entityMap, diagnostics);
 		if (queryInfo.isUpdateOrDelete && queryInfo.methodSignature) {
@@ -58,6 +61,28 @@ export function validateJpql(
 				});
 			}
 		}
+
+		if (knownEntities.length > 0 && queryInfo.aliases.size > 0) {
+			if (queryInfo.selectedAlias && !queryInfo.dtoProjectionType && !queryInfo.aliases.has(queryInfo.selectedAlias)) {
+				const availableAliases = [...queryInfo.aliases.keys()];
+				const suggestion = findClosestProperty(queryInfo.selectedAlias, availableAliases)
+					?? (availableAliases.length === 1 ? availableAliases[0] : undefined);
+				const offset = queryInfo.selectedAliasOffset ?? {
+					startOffset: queryInfo.queryStartOffset,
+					endOffset: queryInfo.queryStartOffset + queryInfo.selectedAlias.length,
+				};
+				diagnostics.push({
+					message: `Unknown alias '${queryInfo.selectedAlias}'.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
+					severity: 'error',
+					startOffset: offset.startOffset,
+					endOffset: offset.endOffset,
+					code: 'UNKNOWN_ALIAS',
+					unknownAlias: queryInfo.selectedAlias,
+					suggestedAlias: suggestion,
+				});
+			}
+		}
+
 		for (const propAccess of queryInfo.propertyAccesses) {
 			const targetEntityName = queryInfo.aliases.get(propAccess.alias);
 			if (targetEntityName) {
@@ -72,9 +97,23 @@ export function validateJpql(
 							startOffset: propAccess.startOffset,
 							endOffset: propAccess.endOffset,
 							code: 'UNKNOWN_PROPERTY',
+							suggestedProperty: suggestion,
 						});
 					}
 				}
+			} else if (knownEntities.length > 0 && queryInfo.aliases.size > 0) {
+				const availableAliases = [...queryInfo.aliases.keys()];
+				const suggestion = findClosestProperty(propAccess.alias, availableAliases)
+					?? (availableAliases.length === 1 ? availableAliases[0] : undefined);
+				diagnostics.push({
+					message: `Unknown alias '${propAccess.alias}'.${suggestion ? ` Did you mean '${suggestion}'?` : ''}`,
+					severity: 'error',
+					startOffset: propAccess.aliasStartOffset,
+					endOffset: propAccess.aliasEndOffset,
+					code: 'UNKNOWN_ALIAS',
+					unknownAlias: propAccess.alias,
+					suggestedAlias: suggestion,
+				});
 			}
 		}
 	}

@@ -15,12 +15,22 @@ export interface JpqlQueryInfo {
 	readonly isUpdateOrDelete?: boolean;
 	readonly selectedExpression?: string;
 	readonly selectedAlias?: string;
+	readonly selectedAliasOffset?: { startOffset: number; endOffset: number };
 	readonly dtoProjectionType?: string;
 	readonly functions: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly aliases: ReadonlyMap<string, string>; // alias -> EntityName
 	readonly namedParameters: readonly { name: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[];
 	readonly positionalParameters: readonly { index: number; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[];
-	readonly propertyAccesses: readonly { alias: string; property: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[];
+	readonly propertyAccesses: readonly {
+		alias: string;
+		property: string;
+		startOffset: number;
+		endOffset: number;
+		contentStart: number;
+		contentEnd: number;
+		aliasStartOffset: number;
+		aliasEndOffset: number;
+	}[];
 	readonly referencedEntities: readonly { name: string; startOffset: number; endOffset: number }[];
 	readonly methodSignature?: JpqlMethodSignature;
 }
@@ -96,8 +106,21 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		const selectionMatch = queryContent.match(/\bSELECT\s+(?:DISTINCT\s+)?([\s\S]*?)\s+FROM\b/i);
 		const selectedExpression = selectionMatch?.[1].trim();
 		const selectedAlias = selectedExpression && /^[A-Za-z_]\w*$/.test(selectedExpression) ? selectedExpression : undefined;
-		const dtoProjectionType = selectedExpression?.match(/^NEW\s+([\w$.]+)\s*\(/i)?.[1];
 		const sourceOffsetAt = (index: number) => sourceOffsets[Math.min(index, sourceOffsets.length - 1)];
+		let selectedAliasOffset: { startOffset: number; endOffset: number } | undefined;
+		if (selectedAlias && selectionMatch && selectionMatch.index !== undefined) {
+			const selectPart = selectionMatch[0];
+			const exprIndexInMatch = selectPart.indexOf(selectedAlias);
+			if (exprIndexInMatch >= 0) {
+				const aliasContentStart = selectionMatch.index + exprIndexInMatch;
+				const aliasContentEnd = aliasContentStart + selectedAlias.length;
+				selectedAliasOffset = {
+					startOffset: sourceOffsetAt(aliasContentStart),
+					endOffset: sourceOffsetAt(aliasContentEnd - 1) + 1,
+				};
+			}
+		}
+		const dtoProjectionType = selectedExpression?.match(/^NEW\s+([\w$.]+)\s*\(/i)?.[1];
 		const functions = extractFunctions(queryContent, sourceOffsetAt);
 		const namedParameters = extractNamedParameters(queryContent, sourceOffsetAt);
 		const positionalParameters = extractPositionalParameters(queryContent, sourceOffsetAt);
@@ -117,6 +140,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			isUpdateOrDelete,
 			selectedExpression,
 			selectedAlias,
+			selectedAliasOffset,
 			dtoProjectionType,
 			functions,
 			aliases,
@@ -248,24 +272,36 @@ function extractQuerySource(text: string, argsStart: number, argsEnd: number, an
 	};
 }
 
+const JPQL_CLAUSE_KEYWORDS = new Set([
+	'WHERE', 'SET', 'HAVING', 'GROUP', 'ORDER', 'SELECT', 'FETCH', 'JOIN', 'LEFT', 'RIGHT',
+	'INNER', 'OUTER', 'FULL', 'CROSS', 'ON', 'IN', 'AS', 'UPDATE', 'DELETE', 'FROM', 'AND', 'OR', 'BY',
+]);
+
 function resolveAliases(query: string, knownEntities: readonly EntityInfo[], preferredPackage?: string, sourceText?: string): Map<string, string> {
 	const aliases = new Map<string, string>();
 	const entityMap = createEntityLookup(knownEntities, preferredPackage, sourceText);
 
-	// 1. FROM Entity [AS] alias
-	const fromMatches = query.matchAll(/\bFROM\s+([A-Z]\w*)(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi);
+	// 1. FROM Entity [AS] alias, or UPDATE Entity [AS] alias
+	const fromMatches = query.matchAll(/\b(?:FROM|UPDATE)\s+([A-Z]\w*)(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi);
 	for (const m of fromMatches) {
 		const entityName = m[1];
-		const alias = m[2] ?? entityName;
+		const candidateAlias = m[2];
+		const alias = candidateAlias && !JPQL_CLAUSE_KEYWORDS.has(candidateAlias.toUpperCase())
+			? candidateAlias
+			: entityName;
 		aliases.set(alias, entityName);
 	}
 
 	// 2. JOIN alias.prop [AS] joinAlias. Repeat to resolve chained joins.
-	const joinMatches = [...query.matchAll(/\bJOIN\s+(?:FETCH\s+)?([A-Za-z_]\w*)\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s+(?:AS\s+)?([A-Za-z_]\w*)/gi)];
+	const joinMatches = [...query.matchAll(/\bJOIN\s+(?:FETCH\s+)?([A-Za-z_]\w*)\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\s+(?:AS\s+)?([A-Za-z_]\w*))?/gi)];
 	let changed = true;
 	while (changed) {
 		changed = false;
 		for (const m of joinMatches) {
+			const joinAlias = m[3];
+			if (!joinAlias || JPQL_CLAUSE_KEYWORDS.has(joinAlias.toUpperCase())) {
+				continue;
+			}
 			const parentEntityName = aliases.get(m[1]);
 			const parentEntity = parentEntityName ? entityMap.get(parentEntityName.toLowerCase()) : undefined;
 			if (!parentEntity) {
@@ -275,8 +311,8 @@ function resolveAliases(query: string, knownEntities: readonly EntityInfo[], pre
 			const targetName = property?.targetEntity ?? referencedEntityNames(property?.type ?? '')
 				.find((name) => entityMap.has(name.toLowerCase()));
 			const targetEntity = targetName ? entityMap.get(targetName.toLowerCase()) : undefined;
-			if (targetEntity && aliases.get(m[3]) !== targetEntity.name) {
-				aliases.set(m[3], targetEntity.name);
+			if (targetEntity && aliases.get(joinAlias) !== targetEntity.name) {
+				aliases.set(joinAlias, targetEntity.name);
 				changed = true;
 			}
 		}
@@ -322,14 +358,64 @@ function extractNamedParameters(query: string, sourceOffsetAt: (index: number) =
 	return results;
 }
 
-function extractPropertyAccesses(query: string, sourceOffsetAt: (index: number) => number): { alias: string; property: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[] {
-	const results: { alias: string; property: string; startOffset: number; endOffset: number; contentStart: number; contentEnd: number }[] = [];
+function maskJpqlNonPropertyTokens(query: string): string {
+	const chars = [...query];
+	let quote: "'" | '"' | undefined;
+	for (let i = 0; i < chars.length; i++) {
+		if (quote) {
+			if (chars[i] === quote && chars[i + 1] === quote) {
+				chars[i] = ' ';
+				chars[i + 1] = ' ';
+				i++;
+			} else if (chars[i] === quote) {
+				chars[i] = ' ';
+				quote = undefined;
+			} else {
+				chars[i] = ' ';
+			}
+			continue;
+		}
+		if (chars[i] === "'" || chars[i] === '"') {
+			quote = chars[i] as "'" | '"';
+			chars[i] = ' ';
+		}
+	}
+	let result = chars.join('');
+	result = result.replace(/\bNEW\s+([\w$.]+)\s*\(/gi, (match, typeName) => {
+		return match.replace(typeName, ' '.repeat(typeName.length));
+	});
+	return result;
+}
+
+function extractPropertyAccesses(query: string, sourceOffsetAt: (index: number) => number): {
+	alias: string;
+	property: string;
+	startOffset: number;
+	endOffset: number;
+	contentStart: number;
+	contentEnd: number;
+	aliasStartOffset: number;
+	aliasEndOffset: number;
+}[] {
+	const results: {
+		alias: string;
+		property: string;
+		startOffset: number;
+		endOffset: number;
+		contentStart: number;
+		contentEnd: number;
+		aliasStartOffset: number;
+		aliasEndOffset: number;
+	}[] = [];
+	const masked = maskJpqlNonPropertyTokens(query);
 	const regex = /\b([A-Za-z_]\w*)\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\b/g;
 	let match: RegExpExecArray | null;
-	while ((match = regex.exec(query)) !== null) {
+	while ((match = regex.exec(masked)) !== null) {
 		const alias = match[1];
 		const property = match[2];
-		const propStart = match.index + alias.length + 1;
+		const aliasStart = match.index;
+		const aliasEnd = aliasStart + alias.length;
+		const propStart = aliasEnd + 1;
 		results.push({
 			alias,
 			property,
@@ -337,6 +423,8 @@ function extractPropertyAccesses(query: string, sourceOffsetAt: (index: number) 
 			endOffset: sourceOffsetAt(propStart + property.length - 1) + 1,
 			contentStart: propStart,
 			contentEnd: propStart + property.length,
+			aliasStartOffset: sourceOffsetAt(aliasStart),
+			aliasEndOffset: sourceOffsetAt(aliasEnd - 1) + 1,
 		});
 	}
 	return results;
