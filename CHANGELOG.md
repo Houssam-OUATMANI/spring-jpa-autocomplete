@@ -1,8 +1,21 @@
-# Change Log
+﻿# Change Log
 
 All notable changes to the "Spring Data JPA Tools" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+
+
+## [1.0.7] - 2026-10-28
+
+### Added
+
+- **Persistent disk cache for workspace entity index** - On startup, the extension loads the previously built entity index from `workspaceState` storage (fingerprinted by file mtimes) in under 50 ms. The cache is automatically invalidated when any `.java` file changes and re-persisted after every full scan.
+- **`@EntityGraph` attribute-path completion** - IntelliSense now offers property-path completions inside `@EntityGraph(attributePaths = {...})` annotations, including nested paths (e.g. `orders.totalAmount`). Relation properties are surfaced first.
+- **`@EntityGraph` attribute-path validation** - Unknown attribute paths produce an error diagnostic (`UNKNOWN_ATTRIBUTE_PATH`) with a typo suggestion (*"Unknown attribute path 'emial'. Did you mean 'email'?"*). A **Quick-Fix** replaces the typo with the suggested path.
+- **N+1 query detection (`POTENTIAL_N_PLUS_ONE`)** - The JPQL validator warns when a `OneToMany` / `ManyToMany` collection relation is joined with a plain `JOIN` instead of `JOIN FETCH` and no `@EntityGraph` is present. A **Quick-Fix** converts the `JOIN` to `JOIN FETCH` automatically.
+- **CI/CD pipeline** - GitHub Actions workflow runs type-check, ESLint, and unit tests on Ubuntu and Windows for Node 20.x and 22.x on every push and pull-request.
+- **esbuild bundling** - The extension is now bundled into a single `out/extension.js` with tree-shaking (production build ~325 kB, -40% vs. previous VSIX size).
+- **Cross-file navigation** - F2 (Rename), Shift+F12 (Find References), and CodeLens entity→repository links now resolve symbols in **closed** files by scanning the workspace index, not just open tabs.
 
 ## [1.0.6] - 2026-10-20
 
