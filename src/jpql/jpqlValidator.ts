@@ -8,7 +8,7 @@ export interface JpqlDiagnostic {
 	readonly severity: 'error' | 'warning';
 	readonly startOffset: number;
 	readonly endOffset: number;
-	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'UNKNOWN_ALIAS' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE' | 'MISSING_MODIFYING_ANNOTATION';
+	readonly code: 'UNKNOWN_ENTITY' | 'UNKNOWN_PROPERTY' | 'UNKNOWN_ALIAS' | 'MISSING_METHOD_PARAM' | 'UNUSED_METHOD_PARAM' | 'MISSING_PARAM_ANNOTATION' | 'INVALID_RETURN_TYPE' | 'INVALID_PARAMETER_TYPE' | 'MIXED_PARAMETER_STYLE' | 'MISSING_MODIFYING_ANNOTATION' | 'POTENTIAL_N_PLUS_ONE';
 	readonly paramName?: string;
 	readonly suggestedProperty?: string;
 	readonly suggestedAlias?: string;
@@ -228,6 +228,33 @@ export function validateJpql(
 						paramName: p.name,
 					});
 				}
+			}
+		}
+	}
+
+	// 4. JPA Performance Linter: N+1 query detection
+	if (!queryInfo.isNative && !queryInfo.hasEntityGraph && !queryInfo.isUpdateOrDelete && queryInfo.joins) {
+		for (const join of queryInfo.joins) {
+			if (join.isFetch) {
+				continue;
+			}
+			const parentEntityName = queryInfo.aliases.get(join.parentAlias);
+			if (!parentEntityName) {
+				continue;
+			}
+			const parentEntity = entityMap.get(parentEntityName.toLowerCase());
+			if (!parentEntity) {
+				continue;
+			}
+			const prop = resolveEntityPropertyPath(parentEntity, join.property, entityMap);
+			if (prop && (prop.relation === 'OneToMany' || prop.relation === 'ManyToMany' || prop.isCollection)) {
+				diagnostics.push({
+					message: `Potential N+1 query: association '${join.parentAlias}.${join.property}' is joined without 'FETCH'. Use 'JOIN FETCH ${join.parentAlias}.${join.property}' or define an '@EntityGraph'.`,
+					severity: 'warning',
+					startOffset: join.startOffset,
+					endOffset: join.endOffset,
+					code: 'POTENTIAL_N_PLUS_ONE',
+				});
 			}
 		}
 	}

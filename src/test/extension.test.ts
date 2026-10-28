@@ -25,6 +25,7 @@ import { validateJpaEntities } from '../entityValidator';
 import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
 import { SpringJpaReferenceProvider } from '../navigation/referenceProvider';
 import { SpringJpaRenameProvider } from '../navigation/renameProvider';
+import { createEntityGraphCompletions, validateEntityGraphs } from '../entityGraph/entityGraphSupport';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -1897,6 +1898,129 @@ public class CachedUser {
 		if (originalReadFile) {
 			(vscode.workspace as any).fs.readFile = originalReadFile;
 		}
+	});
+
+	test('createEntityGraphCompletions provides entity attribute suggestions inside attributePaths', () => {
+		const userEntity: any = {
+			name: 'User',
+			uri: vscode.Uri.parse('file:///User.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+				{ name: 'email', type: 'String' },
+				{ name: 'orders', type: 'List<Order>', relation: 'OneToMany', targetEntity: 'Order' },
+			],
+		};
+		const orderEntity: any = {
+			name: 'Order',
+			uri: vscode.Uri.parse('file:///Order.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+				{ name: 'totalAmount', type: 'BigDecimal' },
+			],
+		};
+
+		const repoSrc = `
+package com.example;
+public interface UserRepository extends JpaRepository<User, Long> {
+	@EntityGraph(attributePaths = {"ord"})
+	List<User> findActive();
+}
+`;
+		const doc = {
+			getText: () => repoSrc,
+			offsetAt: () => repoSrc.indexOf('"ord"') + 4,
+			lineAt: () => ({ text: '\t@EntityGraph(attributePaths = {"ord"})' }),
+		} as any;
+
+		const completions = createEntityGraphCompletions(doc, new vscode.Position(3, 36), [userEntity, orderEntity]);
+		assert.ok(completions && completions.length > 0);
+		assert.ok(completions.some((c) => c.label === 'orders'));
+	});
+
+	test('validateEntityGraphs validates attribute paths and catches typos', () => {
+		const userEntity: any = {
+			name: 'User',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///User.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+				{ name: 'email', type: 'String' },
+				{ name: 'orders', type: 'List<Order>', relation: 'OneToMany', targetEntity: 'Order' },
+			],
+		};
+		const repoSrc = `
+package com.example;
+public interface UserRepository extends JpaRepository<User, Long> {
+	@EntityGraph(attributePaths = {"emial", "orders"})
+	List<User> findActive();
+}
+`;
+		const diags = validateEntityGraphs(repoSrc, [userEntity]);
+		assert.strictEqual(diags.length, 1);
+		assert.strictEqual(diags[0].code, 'UNKNOWN_ATTRIBUTE_PATH');
+		assert.strictEqual(diags[0].suggestedProperty, 'email');
+		assert.ok(diags[0].message.includes("Unknown attribute path 'emial'"));
+	});
+
+	test('POTENTIAL_N_PLUS_ONE detects collection joins without FETCH', () => {
+		const userEntity: any = {
+			name: 'User',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///User.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+				{ name: 'orders', type: 'List<Order>', relation: 'OneToMany', targetEntity: 'Order' },
+			],
+		};
+		const orderEntity: any = {
+			name: 'Order',
+			isEntity: true,
+			uri: vscode.Uri.parse('file:///Order.java'),
+			properties: [
+				{ name: 'id', type: 'Long', isId: true },
+			],
+		};
+
+		// 1. Without FETCH -> Warning
+		const queryWithNPlusOne = `
+package com.example;
+public interface UserRepository extends JpaRepository<User, Long> {
+	@Query("SELECT u FROM User u JOIN u.orders o WHERE o.id = :id")
+	List<User> findWithOrders(@Param("id") Long id);
+}
+`;
+		const queries1 = extractAllJpqlQueries(queryWithNPlusOne, [userEntity, orderEntity]);
+		assert.strictEqual(queries1.length, 1);
+		const diags1 = validateJpql(queries1[0], [userEntity, orderEntity]);
+		assert.ok(diags1.some((d) => d.code === 'POTENTIAL_N_PLUS_ONE'), 'Should detect N+1 warning');
+
+		// 2. With JOIN FETCH -> No warning
+		const queryWithFetch = `
+package com.example;
+public interface UserRepository extends JpaRepository<User, Long> {
+	@Query("SELECT u FROM User u JOIN FETCH u.orders o WHERE o.id = :id")
+	List<User> findWithOrders(@Param("id") Long id);
+}
+`;
+		const queries2 = extractAllJpqlQueries(queryWithFetch, [userEntity, orderEntity]);
+		const diags2 = validateJpql(queries2[0], [userEntity, orderEntity]);
+		assert.ok(!diags2.some((d) => d.code === 'POTENTIAL_N_PLUS_ONE'), 'Should NOT detect N+1 when JOIN FETCH is used');
+
+		// 3. Quick-Fix test
+		const provider = new SpringJpaCodeActionProvider();
+		const doc = {
+			uri: vscode.Uri.parse('file:///UserRepository.java'),
+			getText: () => 'JOIN u.orders',
+		} as any;
+		const n1Diag = new vscode.Diagnostic(
+			new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 13)),
+			'Potential N+1 query',
+			vscode.DiagnosticSeverity.Warning,
+		);
+		n1Diag.source = 'spring-jpa';
+		n1Diag.code = 'POTENTIAL_N_PLUS_ONE';
+		const actions = provider.provideCodeActions(doc, n1Diag.range, { diagnostics: [n1Diag] } as any, {} as any);
+		assert.ok(actions.some((a) => a.title === "Convert to 'JOIN FETCH'"));
 	});
 });
 

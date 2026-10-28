@@ -17,6 +17,7 @@ import { resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDiale
 import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
+import { createEntityGraphCompletions, validateEntityGraphs } from './entityGraph/entityGraphSupport';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -31,7 +32,7 @@ export function shouldDisplayDiagnostic(mode: DiagnosticDisplayMode, severity: '
 
 export function hasJpaDiagnosticTargets(text: string): boolean {
 	return /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</.test(text)
-		|| /@(Query|NativeQuery)\s*\(/.test(text)
+		|| /@(Query|NativeQuery|EntityGraph)\s*\(/.test(text)
 		|| /@Entity\b/.test(text);
 }
 
@@ -285,7 +286,15 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 				const entities = getIndexedEntities(document);
 
-				// A. JPQL Completion inside @Query
+				// A. EntityGraph completion
+				if (/@EntityGraph\b/.test(docText)) {
+					const entityGraphItems = createEntityGraphCompletions(document, position, entities);
+					if (entityGraphItems && entityGraphItems.length > 0) {
+						return entityGraphItems;
+					}
+				}
+
+				// B. JPQL Completion inside @Query
 				if (/@(?:Query|NativeQuery)\s*\(/.test(docText)) {
 					const hasNativeQuery = /@NativeQuery\b|nativeQuery\s*=\s*true/.test(docText);
 					const sqlDialect = hasNativeQuery ? await resolveSqlDialect(document, false) : 'generic';
@@ -395,8 +404,9 @@ export function activate(context: vscode.ExtensionContext) {
 		const isRepo = derivedMode !== 'off'
 			&& /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
 		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
+		const hasEntityGraphs = jpqlMode !== 'off' && /@EntityGraph\s*\(/.test(docText);
 		const hasEntities = derivedMode !== 'off' && /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId)\b/.test(docText);
-		if (!isRepo && !hasJpqlQueries && !hasEntities) {
+		if (!isRepo && !hasJpqlQueries && !hasEntities && !hasEntityGraphs) {
 			diagnostics.set(document.uri, documentDiagnostics);
 			return;
 		}
@@ -505,6 +515,25 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 					documentDiagnostics.push(diagnostic);
 				}
+			}
+		}
+
+		if (hasEntityGraphs) {
+			const egDiags = validateEntityGraphs(docText, entities);
+			for (const d of egDiags) {
+				if (!shouldDisplayDiagnostic(jpqlMode, d.severity)) {
+					continue;
+				}
+				const start = document.positionAt(d.startOffset);
+				const end = document.positionAt(d.endOffset);
+				const severity = d.severity === 'error' ? vscode.DiagnosticSeverity.Error : vscode.DiagnosticSeverity.Warning;
+				const diagnostic = new vscode.Diagnostic(new vscode.Range(start, end), d.message, severity);
+				diagnostic.source = 'spring-jpa';
+				diagnostic.code = d.code;
+				if (d.suggestedProperty) {
+					(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = d.suggestedProperty;
+				}
+				documentDiagnostics.push(diagnostic);
 			}
 		}
 

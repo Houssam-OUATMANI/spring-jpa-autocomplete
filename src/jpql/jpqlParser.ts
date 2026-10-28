@@ -2,6 +2,14 @@ import { EntityInfo } from '../entityModel';
 import { createEntityLookup, referencedEntityNames, resolveEntityPropertyPath } from '../entityDiscovery';
 import { decodeJavaString, maskJavaSource, parseJavaParameters, splitTopLevelParameters } from '../javaParsing';
 
+export interface JpqlJoinInfo {
+	readonly isFetch: boolean;
+	readonly parentAlias: string;
+	readonly property: string;
+	readonly startOffset: number;
+	readonly endOffset: number;
+}
+
 export interface JpqlQueryInfo {
 	readonly rawQuery: string;
 	readonly queryContent: string;
@@ -13,6 +21,8 @@ export interface JpqlQueryInfo {
 	readonly isNative: boolean;
 	readonly isModifying?: boolean;
 	readonly isUpdateOrDelete?: boolean;
+	readonly hasEntityGraph?: boolean;
+	readonly joins?: readonly JpqlJoinInfo[];
 	readonly selectedExpression?: string;
 	readonly selectedAlias?: string;
 	readonly selectedAliasOffset?: { startOffset: number; endOffset: number };
@@ -86,6 +96,7 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		const queryEndOffset = sourceOffsets[sourceOffsets.length - 1] + 1;
 
 		const isModifying = /@Modifying\b/.test(documentText.slice(Math.max(0, match.index - 150), methodEnd));
+		const hasEntityGraph = /@EntityGraph\b/.test(documentText.slice(Math.max(0, match.index - 250), methodEnd));
 		const isUpdateOrDelete = /^\s*(?:UPDATE\b|DELETE\b)/i.test(queryContent.trim());
 
 		// Extract method signature
@@ -126,6 +137,20 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 		const positionalParameters = extractPositionalParameters(queryContent, sourceOffsetAt);
 		const propertyAccesses = extractPropertyAccesses(queryContent, sourceOffsetAt);
 		const referencedEntities = extractReferencedEntities(queryContent, sourceOffsetAt);
+		const joins: JpqlJoinInfo[] = [];
+		const joinRegex = /\bJOIN\s+(FETCH\s+)?([A-Za-z_]\w*)\.([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)/gi;
+		let joinMatch: RegExpExecArray | null;
+		while ((joinMatch = joinRegex.exec(queryContent)) !== null) {
+			const start = sourceOffsetAt(joinMatch.index);
+			const end = sourceOffsetAt(joinMatch.index + joinMatch[0].length - 1) + 1;
+			joins.push({
+				isFetch: Boolean(joinMatch[1]),
+				parentAlias: joinMatch[2],
+				property: joinMatch[3],
+				startOffset: start,
+				endOffset: end,
+			});
+		}
 
 		queries.push({
 			rawQuery: fullMatch,
@@ -138,6 +163,8 @@ export function extractAllJpqlQueries(documentText: string, knownEntities: reado
 			isNative,
 			isModifying,
 			isUpdateOrDelete,
+			hasEntityGraph,
+			joins,
 			selectedExpression,
 			selectedAlias,
 			selectedAliasOffset,

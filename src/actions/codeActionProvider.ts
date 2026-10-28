@@ -237,6 +237,31 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						actions.push(createAction);
 					}
 				}
+			} else if (code === 'UNKNOWN_ATTRIBUTE_PATH') {
+				const suggestedProperty = springDiagnostic.suggestedProperty ?? diagnostic.message.match(/Did you mean '([^']+)'\?/)?.[1];
+				if (suggestedProperty) {
+					const action = new vscode.CodeAction(
+						`Change attribute path to '${suggestedProperty}'`,
+						vscode.CodeActionKind.QuickFix,
+					);
+					action.edit = new vscode.WorkspaceEdit();
+					action.edit.replace(document.uri, diagnostic.range, suggestedProperty);
+					action.diagnostics = [diagnostic];
+					action.isPreferred = true;
+					actions.push(action);
+				}
+			} else if (code === 'POTENTIAL_N_PLUS_ONE') {
+				const action = new vscode.CodeAction(
+					"Convert to 'JOIN FETCH'",
+					vscode.CodeActionKind.QuickFix,
+				);
+				action.edit = new vscode.WorkspaceEdit();
+				const diagText = typeof document.getText === 'function' ? document.getText(diagnostic.range) : '';
+				const replaced = diagText.replace(/\bJOIN\s+/i, 'JOIN FETCH ');
+				action.edit.replace(document.uri, diagnostic.range, replaced.length > 0 ? replaced : 'JOIN FETCH');
+				action.diagnostics = [diagnostic];
+				action.isPreferred = true;
+				actions.push(action);
 			}
 		}
 
