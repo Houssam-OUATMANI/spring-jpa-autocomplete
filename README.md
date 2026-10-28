@@ -1,6 +1,6 @@
 # Spring Data JPA Tools
 
-**Version 1.0.6** · 
+**Version 1.0.7** · 
 
 [Install from Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 <br>
@@ -188,7 +188,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The latest release is `1.0.5`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
+The latest release is `1.0.7`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ## Requirements
 
