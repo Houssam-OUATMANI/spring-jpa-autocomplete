@@ -1831,5 +1831,72 @@ public interface UserRepository extends JpaRepository<User, Long> {
 		(vscode.workspace as any).openTextDocument = originalOpen;
 		index.clear();
 	});
+
+	test('WorkspaceEntityIndex persists and rehydrates cache from storage', async () => {
+		const storageMap = new Map<string, any>();
+		const mockStorage = {
+			get: <T>(key: string): T | undefined => storageMap.get(key),
+			update: async (key: string, value: any): Promise<void> => {
+				if (value === undefined) {
+					storageMap.delete(key);
+				} else {
+					storageMap.set(key, value);
+				}
+			},
+		};
+
+		const userUri = vscode.Uri.parse('file:///CachedUser.java');
+		const userText = `
+package com.example;
+@Entity
+public class CachedUser {
+	@Id
+	private Long id;
+	private String username;
+}
+`;
+		const userDoc = {
+			uri: userUri,
+			languageId: 'java',
+			getText: () => userText,
+		} as any;
+
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(true);
+		index.setStorage(mockStorage);
+		index.updateDocument(userDoc);
+
+		// Persist cache
+		await index.persistCache();
+		assert.ok(storageMap.has('springJpa.workspaceEntityCache'), 'Cache must be persisted to storage');
+
+		// Clear in-memory index without clearing disk
+		index.clear(false);
+		assert.strictEqual(index.getAllEntities().length, 0);
+
+		// Mock workspace.findFiles and fs.readFile to trigger scanWorkspace with cache hit
+		const originalFindFiles = vscode.workspace.findFiles;
+		const originalReadFile = (vscode.workspace as any).fs?.readFile;
+		(vscode.workspace as any).findFiles = async () => [userUri];
+		if (!(vscode.workspace as any).fs) {
+			(vscode.workspace as any).fs = {};
+		}
+		(vscode.workspace as any).fs.readFile = async () => Buffer.from(userText, 'utf8');
+
+		await index.ensureInitialized();
+
+		const loadedEntity = index.getEntity('CachedUser');
+		assert.ok(loadedEntity, 'Entity must be rehydrated from cache');
+		assert.strictEqual(loadedEntity?.name, 'CachedUser');
+		assert.ok(loadedEntity?.properties.some((p) => p.name === 'username'));
+
+		// Cleanup
+		index.clear(true);
+		index.setStorage(undefined);
+		(vscode.workspace as any).findFiles = originalFindFiles;
+		if (originalReadFile) {
+			(vscode.workspace as any).fs.readFile = originalReadFile;
+		}
+	});
 });
 

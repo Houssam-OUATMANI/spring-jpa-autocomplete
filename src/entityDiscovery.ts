@@ -10,6 +10,76 @@ export interface RepositoryInfo {
 	readonly managedEntityNames: readonly string[];
 }
 
+export interface StorageMemento {
+	get<T>(key: string): T | undefined;
+	update(key: string, value: any): Thenable<void>;
+}
+
+const CACHE_STORAGE_KEY = 'springJpa.workspaceEntityCache';
+const CACHE_VERSION = 1;
+
+interface SerializedEntityInfo extends Omit<EntityInfo, 'uri'> {
+	uri: string;
+}
+interface SerializedRepositoryInfo extends Omit<RepositoryInfo, 'uri'> {
+	uri: string;
+}
+interface SerializedProjectionTypeInfo extends Omit<ProjectionTypeInfo, 'uri'> {
+	uri: string;
+}
+interface CachedFileEntry {
+	fingerprint: string;
+	entities: readonly SerializedEntityInfo[];
+	projectionTypes: readonly SerializedProjectionTypeInfo[];
+	repositories: readonly SerializedRepositoryInfo[];
+}
+interface WorkspaceCacheData {
+	version: number;
+	files: Record<string, CachedFileEntry>;
+}
+
+function serializeEntity(entity: EntityInfo): SerializedEntityInfo {
+	return {
+		...entity,
+		uri: entity.uri.toString(),
+	};
+}
+
+function serializeRepository(repo: RepositoryInfo): SerializedRepositoryInfo {
+	return {
+		...repo,
+		uri: repo.uri.toString(),
+	};
+}
+
+function serializeProjection(proj: ProjectionTypeInfo): SerializedProjectionTypeInfo {
+	return {
+		...proj,
+		uri: proj.uri.toString(),
+	};
+}
+
+function rehydrateEntity(item: SerializedEntityInfo): EntityInfo {
+	return {
+		...item,
+		uri: typeof item.uri === 'string' ? vscode.Uri.parse(item.uri) : item.uri,
+	};
+}
+
+function rehydrateRepository(item: SerializedRepositoryInfo): RepositoryInfo {
+	return {
+		...item,
+		uri: typeof item.uri === 'string' ? vscode.Uri.parse(item.uri) : item.uri,
+	};
+}
+
+function rehydrateProjection(item: SerializedProjectionTypeInfo): ProjectionTypeInfo {
+	return {
+		...item,
+		uri: typeof item.uri === 'string' ? vscode.Uri.parse(item.uri) : item.uri,
+	};
+}
+
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set([
@@ -45,12 +115,18 @@ export class WorkspaceEntityIndex {
 	private sourceFingerprints = new Map<string, string>();
 	private isInitialized = false;
 	private initPromise: Promise<void> | undefined;
+	private storage: StorageMemento | undefined;
+	private persistTimer: ReturnType<typeof setTimeout> | undefined;
 
 	public static getInstance(): WorkspaceEntityIndex {
 		if (!WorkspaceEntityIndex.instance) {
 			WorkspaceEntityIndex.instance = new WorkspaceEntityIndex();
 		}
 		return WorkspaceEntityIndex.instance;
+	}
+
+	public setStorage(storage: StorageMemento | undefined): void {
+		this.storage = storage;
 	}
 
 	public async ensureInitialized(): Promise<void> {
@@ -63,7 +139,7 @@ export class WorkspaceEntityIndex {
 		await this.initPromise;
 	}
 
-	public clear(): void {
+	public clear(clearDisk = false): void {
 		this.entitiesByUri.clear();
 		this.projectionTypesByUri.clear();
 		this.repositoriesByUri.clear();
@@ -71,6 +147,50 @@ export class WorkspaceEntityIndex {
 		this.sourceFingerprints.clear();
 		this.isInitialized = false;
 		this.initPromise = undefined;
+		if (this.persistTimer) {
+			clearTimeout(this.persistTimer);
+			this.persistTimer = undefined;
+		}
+		if (clearDisk && this.storage) {
+			void this.storage.update(CACHE_STORAGE_KEY, undefined);
+		}
+	}
+
+	public async persistCache(): Promise<void> {
+		if (!this.storage) {
+			return;
+		}
+		const files: Record<string, CachedFileEntry> = {};
+		for (const [uriKey, fingerprint] of this.sourceFingerprints) {
+			const entities = this.entitiesByUri.get(uriKey) ?? [];
+			const projectionTypes = this.projectionTypesByUri.get(uriKey) ?? [];
+			const repositories = this.repositoriesByUri.get(uriKey) ?? [];
+			files[uriKey] = {
+				fingerprint,
+				entities: entities.map(serializeEntity),
+				projectionTypes: projectionTypes.map(serializeProjection),
+				repositories: repositories.map(serializeRepository),
+			};
+		}
+		const cache: WorkspaceCacheData = {
+			version: CACHE_VERSION,
+			files,
+		};
+		try {
+			await this.storage.update(CACHE_STORAGE_KEY, cache);
+		} catch {
+			// ignore storage errors
+		}
+	}
+
+	public schedulePersistCache(debounceMs = 1500): void {
+		if (this.persistTimer) {
+			clearTimeout(this.persistTimer);
+		}
+		this.persistTimer = setTimeout(() => {
+			this.persistTimer = undefined;
+			void this.persistCache();
+		}, debounceMs);
 	}
 
 	public updateDocument(document: vscode.TextDocument): EntityInfo | undefined {
@@ -104,6 +224,7 @@ export class WorkspaceEntityIndex {
 		if (previousEntities || entities.length > 0) {
 			this.rebuildNameIndex();
 		}
+		this.schedulePersistCache();
 		return entities[0];
 	}
 
@@ -114,6 +235,7 @@ export class WorkspaceEntityIndex {
 		this.repositoriesByUri.delete(uriKey);
 		this.sourceFingerprints.delete(uriKey);
 		this.rebuildNameIndex();
+		this.schedulePersistCache();
 	}
 
 	public getEntity(name: string, preferredPackage?: string): EntityInfo | undefined {
@@ -211,16 +333,43 @@ export class WorkspaceEntityIndex {
 				? '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist}/**'
 				: '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist,src/test}/**';
 			const files = await vscode.workspace.findFiles('**/*.java', excluded);
+
+			let cachedFiles: Record<string, CachedFileEntry> | undefined;
+			try {
+				const cachedData = this.storage?.get<WorkspaceCacheData>(CACHE_STORAGE_KEY);
+				if (cachedData && cachedData.version === CACHE_VERSION && cachedData.files) {
+					cachedFiles = cachedData.files;
+				}
+			} catch {
+				cachedFiles = undefined;
+			}
+
 			let lastYield = Date.now();
 			for (const uri of files) {
 				try {
 					if (isExcludedJavaUri(uri, includeTestSources)) {
 						continue;
 					}
+					const uriKey = uri.toString();
 					const contents = await vscode.workspace.fs.readFile(uri);
 					const text = Buffer.from(contents).toString('utf8');
-					const uriKey = uri.toString();
 					const fingerprint = sourceFingerprint(text);
+
+					const cached = cachedFiles?.[uriKey];
+					if (cached && cached.fingerprint === fingerprint) {
+						this.sourceFingerprints.set(uriKey, fingerprint);
+						if (cached.entities?.length > 0) {
+							this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
+						}
+						if (cached.projectionTypes?.length > 0) {
+							this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
+						}
+						if (cached.repositories?.length > 0) {
+							this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
+						}
+						continue;
+					}
+
 					this.sourceFingerprints.set(uriKey, fingerprint);
 					const projectionTypes: ProjectionTypeInfo[] = [];
 					const entities = parseEntityModels(text, uri, projectionTypes);
@@ -243,6 +392,7 @@ export class WorkspaceEntityIndex {
 		} finally {
 			this.rebuildNameIndex();
 			this.isInitialized = true;
+			void this.persistCache();
 		}
 	}
 

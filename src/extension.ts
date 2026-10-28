@@ -37,6 +37,7 @@ export function hasJpaDiagnosticTargets(text: string): boolean {
 
 export function activate(context: vscode.ExtensionContext) {
 	const entityIndex = WorkspaceEntityIndex.getInstance();
+	entityIndex.setStorage(context.workspaceState);
 	const diagnosticTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
@@ -52,7 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const rebuildIndex = vscode.commands.registerCommand('springJpa.rebuildIndex', async () => {
 		const started = Date.now();
-		entityIndex.clear();
+		entityIndex.clear(true);
 		await entityIndex.ensureInitialized();
 		for (const document of vscode.workspace.textDocuments) {
 			if (document.languageId === 'java' && !isExcludedJavaDocument(document)) {
@@ -646,4 +647,6 @@ function parseMethodParameters(paramsText: string): { name: string; type: string
 	return parseJavaParameters(paramsText).map(({ name, type }) => ({ name, type }));
 }
 
-export function deactivate() { }
+export function deactivate() {
+	void WorkspaceEntityIndex.getInstance().persistCache();
+}
