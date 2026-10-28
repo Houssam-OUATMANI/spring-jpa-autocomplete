@@ -6,7 +6,7 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 		if (document.languageId !== 'java') {
 			return [];
 		}
-		if (!vscode.workspace.getConfiguration('springJpa').get<boolean>('enableCodeLens', true)) {
+		if (typeof vscode.workspace.getConfiguration !== 'undefined' && !vscode.workspace.getConfiguration('springJpa').get<boolean>('enableCodeLens', true)) {
 			return [];
 		}
 		const index = WorkspaceEntityIndex.getInstance();
@@ -41,9 +41,24 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 			const entityPos = new vscode.Position(entity.location.line, entity.location.character);
 			const entityRange = new vscode.Range(entityPos, new vscode.Position(entity.location.line, entity.location.character + entity.name.length));
 
-			// Find repositories in open/known workspace documents that manage this entity
+			// Find repositories in index or open workspace documents that manage this entity
+			const indexedRepos = index.getRepositoriesForEntity(entity.name);
+			const seenUris = new Set<string>();
+
+			for (const repo of indexedRepos) {
+				if (repo.uri.toString() === document.uri.toString()) {
+					continue;
+				}
+				seenUris.add(repo.uri.toString());
+				lenses.push(new vscode.CodeLens(entityRange, {
+					command: 'springJpa.openRepository',
+					title: `Spring Data: ${repo.name}`,
+					arguments: [repo.uri],
+				}));
+			}
+
 			for (const otherDoc of vscode.workspace.textDocuments) {
-				if (otherDoc.uri.toString() === document.uri.toString() || otherDoc.languageId !== 'java') {
+				if (otherDoc.uri.toString() === document.uri.toString() || otherDoc.languageId !== 'java' || seenUris.has(otherDoc.uri.toString())) {
 					continue;
 				}
 				const otherText = otherDoc.getText();

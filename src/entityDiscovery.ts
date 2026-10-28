@@ -1,7 +1,14 @@
 import * as vscode from 'vscode';
 import { EntityInfo, EntityProperty, parseEntityModels, ProjectionTypeInfo, PropertyLocation } from './entityModel';
+import { maskJavaSource } from './javaParsing';
 
 export { EntityInfo, EntityProperty, ProjectionTypeInfo, PropertyLocation };
+
+export interface RepositoryInfo {
+	readonly uri: vscode.Uri;
+	readonly name: string;
+	readonly managedEntityNames: readonly string[];
+}
 
 const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
@@ -33,6 +40,7 @@ export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
 	private entitiesByUri = new Map<string, readonly EntityInfo[]>();
 	private projectionTypesByUri = new Map<string, readonly ProjectionTypeInfo[]>();
+	private repositoriesByUri = new Map<string, readonly RepositoryInfo[]>();
 	private entitiesByName = new Map<string, EntityInfo[]>();
 	private sourceFingerprints = new Map<string, string>();
 	private isInitialized = false;
@@ -58,6 +66,7 @@ export class WorkspaceEntityIndex {
 	public clear(): void {
 		this.entitiesByUri.clear();
 		this.projectionTypesByUri.clear();
+		this.repositoriesByUri.clear();
 		this.entitiesByName.clear();
 		this.sourceFingerprints.clear();
 		this.isInitialized = false;
@@ -84,6 +93,14 @@ export class WorkspaceEntityIndex {
 		} else {
 			this.entitiesByUri.delete(uriKey);
 		}
+
+		const repos = extractRepositoryInfos(text, document.uri);
+		if (repos.length > 0) {
+			this.repositoriesByUri.set(uriKey, repos);
+		} else {
+			this.repositoriesByUri.delete(uriKey);
+		}
+
 		if (previousEntities || entities.length > 0) {
 			this.rebuildNameIndex();
 		}
@@ -94,6 +111,7 @@ export class WorkspaceEntityIndex {
 		const uriKey = uri.toString();
 		this.entitiesByUri.delete(uriKey);
 		this.projectionTypesByUri.delete(uriKey);
+		this.repositoriesByUri.delete(uriKey);
 		this.sourceFingerprints.delete(uriKey);
 		this.rebuildNameIndex();
 	}
@@ -126,6 +144,66 @@ export class WorkspaceEntityIndex {
 		return this.entitiesByUri.get(uri.toString()) ?? [];
 	}
 
+	public getRepositoriesForEntity(entityName: string): readonly RepositoryInfo[] {
+		const result: RepositoryInfo[] = [];
+		const search = entityName.toLowerCase();
+		for (const repos of this.repositoriesByUri.values()) {
+			for (const r of repos) {
+				if (r.managedEntityNames.some((m) => m.toLowerCase() === search)) {
+					result.push(r);
+				}
+			}
+		}
+		return result;
+	}
+
+	public getAllRepositories(): readonly RepositoryInfo[] {
+		return [...this.repositoriesByUri.values()].flat();
+	}
+
+	public getRepositoryUris(): readonly vscode.Uri[] {
+		const uris = new Map<string, vscode.Uri>();
+		for (const repos of this.repositoriesByUri.values()) {
+			for (const r of repos) {
+				uris.set(r.uri.toString(), r.uri);
+			}
+		}
+		return [...uris.values()];
+	}
+
+	public async getCandidateDocuments(): Promise<vscode.TextDocument[]> {
+		const openDocsByUri = new Map<string, vscode.TextDocument>();
+		for (const doc of vscode.workspace.textDocuments) {
+			if (doc.languageId === 'java') {
+				openDocsByUri.set(doc.uri.toString(), doc);
+			}
+		}
+
+		const targetUris = new Map<string, vscode.Uri>();
+		for (const repo of this.getAllRepositories()) {
+			targetUris.set(repo.uri.toString(), repo.uri);
+		}
+		for (const [uriStr, doc] of openDocsByUri) {
+			targetUris.set(uriStr, doc.uri);
+		}
+
+		const docs: vscode.TextDocument[] = [];
+		for (const [uriStr, uri] of targetUris) {
+			const openDoc = openDocsByUri.get(uriStr);
+			if (openDoc) {
+				docs.push(openDoc);
+			} else {
+				try {
+					const doc = await vscode.workspace.openTextDocument(uri);
+					docs.push(doc);
+				} catch {
+					// ignore
+				}
+			}
+		}
+		return docs;
+	}
+
 	private async scanWorkspace(): Promise<void> {
 		try {
 			const includeTestSources = this.includeTestSources();
@@ -149,6 +227,10 @@ export class WorkspaceEntityIndex {
 					this.projectionTypesByUri.set(uriKey, projectionTypes);
 					if (entities.length > 0) {
 						this.entitiesByUri.set(uriKey, entities);
+					}
+					const repos = extractRepositoryInfos(text, uri);
+					if (repos.length > 0) {
+						this.repositoriesByUri.set(uriKey, repos);
 					}
 				} catch {
 					// ignore
@@ -187,6 +269,37 @@ export function parseEntity(text: string, uri: vscode.Uri): EntityInfo | undefin
 
 export function extractRepositoryEntityNames(text: string): string[] {
 	return [...text.matchAll(REPOSITORY_ENTITY)].map((match) => match[1]);
+}
+
+export function extractRepositoryInfos(text: string, uri: vscode.Uri): RepositoryInfo[] {
+	const repos: RepositoryInfo[] = [];
+	const masked = maskJavaSource(text);
+	const repoRegex = /\binterface\s+([A-Za-z_$]\w*)\s*(?:<[^>]*>)?\s*extends\s+([^{]+)\{/g;
+	let match: RegExpExecArray | null;
+	while ((match = repoRegex.exec(masked)) !== null) {
+		const repoName = match[1];
+		const extendsClause = match[2];
+		const managedEntities = extractRepositoryEntityNames(extendsClause);
+		if (managedEntities.length > 0) {
+			repos.push({
+				uri,
+				name: repoName,
+				managedEntityNames: [...new Set(managedEntities)],
+			});
+		}
+	}
+	if (repos.length === 0 && (/@(?:Query|NativeQuery)\b/.test(masked) || /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\b/.test(masked))) {
+		const typeMatch = masked.match(/\b(?:interface|class)\s+([A-Za-z_$]\w*)/);
+		const managedEntities = extractRepositoryEntityNames(text);
+		if (typeMatch || managedEntities.length > 0) {
+			repos.push({
+				uri,
+				name: typeMatch ? typeMatch[1] : 'SpringRepository',
+				managedEntityNames: [...new Set(managedEntities)],
+			});
+		}
+	}
+	return repos;
 }
 
 export function extractRepositoryEntityNameAt(text: string, offset: number): string | undefined {

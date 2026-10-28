@@ -54,8 +54,9 @@ export class SpringJpaRenameProvider implements vscode.RenameProvider {
 
 		// 2. Scan documents for references in repositories and JPQL
 		const capitalizedNew = newName[0].toUpperCase() + newName.slice(1);
+		const candidateDocs = await index.getCandidateDocuments();
 
-		for (const doc of vscode.workspace.textDocuments) {
+		for (const doc of candidateDocs) {
 			if (doc.languageId !== 'java') {
 				continue;
 			}

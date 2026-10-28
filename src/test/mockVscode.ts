@@ -1,9 +1,29 @@
 export class Position {
 	constructor(public readonly line: number, public readonly character: number) {}
+
+	public compareTo(other: Position): number {
+		if (this.line < other.line) {
+			return -1;
+		}
+		if (this.line > other.line) {
+			return 1;
+		}
+		if (this.character < other.character) {
+			return -1;
+		}
+		if (this.character > other.character) {
+			return 1;
+		}
+		return 0;
+	}
 }
 
 export class Range {
 	constructor(public readonly start: Position, public readonly end: Position) {}
+}
+
+export class CodeLens {
+	constructor(public readonly range: Range, public readonly command?: { title: string; command: string; arguments?: any[] }) {}
 }
 
 export class Location {
@@ -26,8 +46,25 @@ export class Uri {
 }
 
 export const workspace = {
+	textDocuments: [] as any[],
 	findFiles: async () => [] as Uri[],
-	openTextDocument: async () => ({ getText: () => '', uri: Uri.parse('file:///dummy') }),
+	getConfiguration: (_section?: string) => ({
+		get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,
+	}),
+	openTextDocument: async (arg: any) => {
+		const targetUri = typeof arg === 'string' ? arg : arg?.toString?.() ?? '';
+		const found = (workspace as any).textDocuments?.find((d: any) => d.uri?.toString() === targetUri);
+		if (found) {
+			return found;
+		}
+		return {
+			uri: typeof arg === 'object' && arg ? arg : Uri.parse(targetUri || 'file:///dummy'),
+			languageId: 'java',
+			getText: () => '',
+			positionAt: (offset: number) => new Position(0, offset),
+			lineAt: () => ({ text: '' }),
+		};
+	},
 	createFileSystemWatcher: () => ({
 		onDidChange: () => ({ dispose: () => {} }),
 		onDidCreate: () => ({ dispose: () => {} }),

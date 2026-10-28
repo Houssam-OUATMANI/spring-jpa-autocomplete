@@ -38,8 +38,9 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 			references.push(new vscode.Location(document.uri, new vscode.Range(defPos, new vscode.Position(property.location.line, property.location.character + property.name.length))));
 		}
 
-		// Search across all workspace text documents
-		for (const doc of vscode.workspace.textDocuments) {
+		// Search across candidate repository and open documents in workspace
+		const candidateDocs = await index.getCandidateDocuments();
+		for (const doc of candidateDocs) {
 			if (doc.languageId !== 'java') {
 				continue;
 			}

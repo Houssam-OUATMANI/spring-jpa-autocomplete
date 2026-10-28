@@ -11,6 +11,7 @@ import { validateDerivedMethodSignature } from '../derivedQuery/queryValidator';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { validateJpql } from '../jpql/jpqlValidator';
 import { SpringJpaCodeActionProvider } from '../actions/codeActionProvider';
+import { SpringJpaCodeLensProvider } from '../navigation/codeLensProvider';
 import { SpringJpaDefinitionProvider } from '../navigation/definitionProvider';
 import { createDerivedQueryCompletions } from '../derivedQuery/queryCompletion';
 import { findClosestProperty } from '../propertySuggestions';
@@ -1745,6 +1746,90 @@ public class Book {
 		const actions = provider.provideCodeActions(doc, d1.range, { diagnostics: [d1, d2, d3] } as any, {} as any);
 		assert.ok(actions.some((a) => a.title === "Change alias to 'u1'"));
 		assert.ok(actions.some((a) => a.title === "Change all 3 occurrences of alias to 'u1'"));
+	});
+
+	test('RenameProvider, ReferenceProvider and CodeLensProvider discover closed repository files from index', async () => {
+		const userUri = vscode.Uri.parse('file:///User.java');
+		const repoUri = vscode.Uri.parse('file:///UserRepository.java');
+		const userText = `
+package com.example;
+@Entity
+public class User {
+	@Id
+	private Long id;
+	private String email;
+}
+`;
+		const repoText = `
+package com.example;
+public interface UserRepository extends JpaRepository<User, Long> {
+	User findByEmail(String email);
+	@Query("SELECT u FROM User u WHERE u.email = :email")
+	User searchByEmail(@Param("email") String email);
+}
+`;
+		const userDoc = {
+			uri: userUri,
+			languageId: 'java',
+			getText: (range?: vscode.Range) => range ? 'email' : userText,
+			getWordRangeAtPosition: () => new vscode.Range(new vscode.Position(0, userText.indexOf('email')), new vscode.Position(0, userText.indexOf('email') + 5)),
+			lineAt: () => ({ text: userText }),
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as any;
+		const repoDoc = {
+			uri: repoUri,
+			languageId: 'java',
+			getText: () => repoText,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+			lineAt: () => ({ text: repoText }),
+		} as any;
+
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear();
+		index.updateDocument(userDoc);
+		index.updateDocument(repoDoc);
+
+		// SIMULATE: UserRepository is CLOSED in editor tabs (only User.java is open in textDocuments)
+		(vscode.workspace as any).textDocuments = [userDoc];
+		const originalOpen = vscode.workspace.openTextDocument;
+		(vscode.workspace as any).openTextDocument = async (u: any) => {
+			if (u.toString() === repoUri.toString()) {
+				return repoDoc;
+			}
+			return userDoc;
+		};
+
+		// 1. CodeLens check
+		const codeLensProvider = new SpringJpaCodeLensProvider();
+		const lenses = await codeLensProvider.provideCodeLenses(userDoc, {} as any);
+		assert.ok(lenses.some((l: vscode.CodeLens) => l.command?.title === 'Spring Data: UserRepository'));
+
+		// 2. Rename check
+		const renameProvider = new SpringJpaRenameProvider();
+		const edit = await renameProvider.provideRenameEdits(
+			userDoc,
+			new vscode.Position(0, userText.indexOf('email')),
+			'contactEmail',
+			{} as any,
+		);
+		assert.ok(edit);
+		const entries = new Map(edit.entries().map(([u, edits]) => [u.toString(), edits]));
+		assert.ok(entries.has(userUri.toString()), 'User.java must be edited');
+		assert.ok(entries.has(repoUri.toString()), 'UserRepository.java must be edited even if closed');
+
+		// 3. Reference check
+		const refProvider = new SpringJpaReferenceProvider();
+		const refs = await refProvider.provideReferences(
+			userDoc,
+			new vscode.Position(0, userText.indexOf('email')),
+			{} as any,
+			{} as any,
+		);
+		assert.ok(refs.some((r) => r.uri.toString() === repoUri.toString()), 'References must include closed UserRepository');
+
+		// Cleanup
+		(vscode.workspace as any).openTextDocument = originalOpen;
+		index.clear();
 	});
 });
 
