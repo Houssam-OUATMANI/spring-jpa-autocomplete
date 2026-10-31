@@ -70,6 +70,10 @@ export const workspace = {
 		onDidCreate: () => ({ dispose: () => {} }),
 		onDidDelete: () => ({ dispose: () => {} }),
 	}),
+	fs: {
+		readFile: async (_uri: Uri) => Buffer.from(''),
+		stat: async (_uri: Uri) => ({ type: 1, ctime: 0, mtime: 0, size: 0 }),
+	},
 };
 
 export enum DiagnosticSeverity {

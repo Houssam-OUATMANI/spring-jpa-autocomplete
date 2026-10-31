@@ -70,7 +70,19 @@ export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes
 	const hasEntityAnnotation = ENTITY_MODEL_ANNOTATION.test(text);
 	const hasRecord = RECORD_DECLARATION_KEYWORD.test(text);
 	const hasProjection = PROJECTION_INTERFACE.test(text) && PROJECTION_GETTER.test(text) && !REPOSITORY_INTERFACE.test(text);
-	if (!hasEntityAnnotation && !hasRecord && !hasProjection && !projectionTypes) {
+	if (!hasEntityAnnotation && !hasRecord && !hasProjection) {
+		if (projectionTypes) {
+			const maskedText = maskJavaSource(text);
+			const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
+			for (const match of maskedText.matchAll(/\b(record|class|interface)\s+([A-Za-z_$]\w*)/g)) {
+				projectionTypes.push({
+					name: match[2],
+					packageName,
+					kind: match[1] as ProjectionTypeInfo['kind'],
+					uri,
+				});
+			}
+		}
 		return [];
 	}
 

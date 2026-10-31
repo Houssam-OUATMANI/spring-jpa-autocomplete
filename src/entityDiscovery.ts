@@ -29,6 +29,8 @@ interface SerializedProjectionTypeInfo extends Omit<ProjectionTypeInfo, 'uri'> {
 }
 interface CachedFileEntry {
 	fingerprint: string;
+	mtime?: number;
+	size?: number;
 	entities: readonly SerializedEntityInfo[];
 	projectionTypes: readonly SerializedProjectionTypeInfo[];
 	repositories: readonly SerializedRepositoryInfo[];
@@ -106,6 +108,64 @@ function sourceFingerprint(text: string): string {
 	return `${text.length}:${hash >>> 0}`;
 }
 
+function haveEntitiesChanged(
+	previous: readonly EntityInfo[] | undefined,
+	current: readonly EntityInfo[],
+): boolean {
+	if (!previous && current.length === 0) {
+		return false;
+	}
+	if (!previous || previous.length !== current.length) {
+		return true;
+	}
+	for (let i = 0; i < current.length; i++) {
+		const prev = previous[i];
+		const curr = current[i];
+		if (prev.name !== curr.name || prev.entityName !== curr.entityName || prev.packageName !== curr.packageName) {
+			return true;
+		}
+		if (prev.properties.length !== curr.properties.length) {
+			return true;
+		}
+		for (let j = 0; j < curr.properties.length; j++) {
+			const p1 = prev.properties[j];
+			const p2 = curr.properties[j];
+			if (p1.name !== p2.name || p1.type !== p2.type || p1.relation !== p2.relation || p1.targetEntity !== p2.targetEntity) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+function haveRepositoriesChanged(
+	previous: readonly RepositoryInfo[] | undefined,
+	current: readonly RepositoryInfo[],
+): boolean {
+	if (!previous && current.length === 0) {
+		return false;
+	}
+	if (!previous || previous.length !== current.length) {
+		return true;
+	}
+	for (let i = 0; i < current.length; i++) {
+		const prev = previous[i];
+		const curr = current[i];
+		if (prev.name !== curr.name) {
+			return true;
+		}
+		if (prev.managedEntityNames.length !== curr.managedEntityNames.length) {
+			return true;
+		}
+		for (let j = 0; j < curr.managedEntityNames.length; j++) {
+			if (prev.managedEntityNames[j] !== curr.managedEntityNames[j]) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 export class WorkspaceEntityIndex {
 	private static instance: WorkspaceEntityIndex | undefined;
 	private entitiesByUri = new Map<string, readonly EntityInfo[]>();
@@ -113,6 +173,8 @@ export class WorkspaceEntityIndex {
 	private repositoriesByUri = new Map<string, readonly RepositoryInfo[]>();
 	private entitiesByName = new Map<string, EntityInfo[]>();
 	private sourceFingerprints = new Map<string, string>();
+	private fileStats = new Map<string, { mtime: number; size: number }>();
+	private lastUpdateStructuralChange = true;
 	private isInitialized = false;
 	private initPromise: Promise<void> | undefined;
 	private storage: StorageMemento | undefined;
@@ -139,12 +201,18 @@ export class WorkspaceEntityIndex {
 		await this.initPromise;
 	}
 
+	public didLastUpdateCauseStructuralChange(): boolean {
+		return this.lastUpdateStructuralChange;
+	}
+
 	public clear(clearDisk = false): void {
 		this.entitiesByUri.clear();
 		this.projectionTypesByUri.clear();
 		this.repositoriesByUri.clear();
 		this.entitiesByName.clear();
 		this.sourceFingerprints.clear();
+		this.fileStats.clear();
+		this.lastUpdateStructuralChange = true;
 		this.isInitialized = false;
 		this.initPromise = undefined;
 		if (this.persistTimer) {
@@ -165,8 +233,10 @@ export class WorkspaceEntityIndex {
 			const entities = this.entitiesByUri.get(uriKey) ?? [];
 			const projectionTypes = this.projectionTypesByUri.get(uriKey) ?? [];
 			const repositories = this.repositoriesByUri.get(uriKey) ?? [];
+			const stat = this.fileStats.get(uriKey);
 			files[uriKey] = {
 				fingerprint,
+				...(stat ? { mtime: stat.mtime, size: stat.size } : {}),
 				entities: entities.map(serializeEntity),
 				projectionTypes: projectionTypes.map(serializeProjection),
 				repositories: repositories.map(serializeRepository),
@@ -195,15 +265,18 @@ export class WorkspaceEntityIndex {
 
 	public updateDocument(document: vscode.TextDocument): EntityInfo | undefined {
 		if (document.languageId !== 'java' || isExcludedJavaUri(document.uri, this.includeTestSources())) {
+			this.lastUpdateStructuralChange = false;
 			return undefined;
 		}
 		const uriKey = document.uri.toString();
 		const text = document.getText();
 		const fingerprint = sourceFingerprint(text);
 		if (this.sourceFingerprints.get(uriKey) === fingerprint) {
+			this.lastUpdateStructuralChange = false;
 			return this.entitiesByUri.get(uriKey)?.[0];
 		}
 		const previousEntities = this.entitiesByUri.get(uriKey);
+		const previousRepos = this.repositoriesByUri.get(uriKey);
 		const projectionTypes: ProjectionTypeInfo[] = [];
 		const entities = parseEntityModels(text, document.uri, projectionTypes);
 		this.sourceFingerprints.set(uriKey, fingerprint);
@@ -221,6 +294,10 @@ export class WorkspaceEntityIndex {
 			this.repositoriesByUri.delete(uriKey);
 		}
 
+		const entitiesChanged = haveEntitiesChanged(previousEntities, entities);
+		const reposChanged = haveRepositoriesChanged(previousRepos, repos);
+		this.lastUpdateStructuralChange = entitiesChanged || reposChanged;
+
 		if (previousEntities || entities.length > 0) {
 			this.rebuildNameIndex();
 		}
@@ -230,10 +307,14 @@ export class WorkspaceEntityIndex {
 
 	public removeUri(uri: vscode.Uri): void {
 		const uriKey = uri.toString();
+		const hadEntities = this.entitiesByUri.has(uriKey);
+		const hadRepos = this.repositoriesByUri.has(uriKey);
 		this.entitiesByUri.delete(uriKey);
 		this.projectionTypesByUri.delete(uriKey);
 		this.repositoriesByUri.delete(uriKey);
 		this.sourceFingerprints.delete(uriKey);
+		this.fileStats.delete(uriKey);
+		this.lastUpdateStructuralChange = hadEntities || hadRepos;
 		this.rebuildNameIndex();
 		this.schedulePersistCache();
 	}
@@ -351,11 +432,44 @@ export class WorkspaceEntityIndex {
 						continue;
 					}
 					const uriKey = uri.toString();
+					const cached = cachedFiles?.[uriKey];
+
+					// FAST PATH: Check file stat (mtime + size) without reading file content from disk
+					let stat: { mtime: number; size: number } | undefined;
+					try {
+						if (vscode.workspace.fs?.stat) {
+							const fileStat = await vscode.workspace.fs.stat(uri);
+							stat = { mtime: fileStat.mtime, size: fileStat.size };
+						}
+					} catch {
+						stat = undefined;
+					}
+
+					if (cached && stat && cached.mtime !== undefined && cached.size !== undefined
+						&& cached.mtime === stat.mtime && cached.size === stat.size) {
+						this.sourceFingerprints.set(uriKey, cached.fingerprint);
+						this.fileStats.set(uriKey, stat);
+						if (cached.entities?.length > 0) {
+							this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
+						}
+						if (cached.projectionTypes?.length > 0) {
+							this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
+						}
+						if (cached.repositories?.length > 0) {
+							this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
+						}
+						continue;
+					}
+
+					// SLOW PATH: Read file from disk
 					const contents = await vscode.workspace.fs.readFile(uri);
 					const text = Buffer.from(contents).toString('utf8');
 					const fingerprint = sourceFingerprint(text);
 
-					const cached = cachedFiles?.[uriKey];
+					if (stat) {
+						this.fileStats.set(uriKey, stat);
+					}
+
 					if (cached && cached.fingerprint === fingerprint) {
 						this.sourceFingerprints.set(uriKey, fingerprint);
 						if (cached.entities?.length > 0) {

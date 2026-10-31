@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, getIndexedEntities, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
-import { parseEntityModel, parseEntityModels } from '../entityModel';
+import { parseEntityModel, parseEntityModels, ProjectionTypeInfo } from '../entityModel';
 import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
 import { extractJpqlEntityNames, extractJpqlNamedParameters, validateJpqlQuery } from '../jpql';
@@ -2021,6 +2021,132 @@ public interface UserRepository extends JpaRepository<User, Long> {
 		n1Diag.code = 'POTENTIAL_N_PLUS_ONE';
 		const actions = provider.provideCodeActions(doc, n1Diag.range, { diagnostics: [n1Diag] } as any, {} as any);
 		assert.ok(actions.some((a) => a.title === "Convert to 'JOIN FETCH'"));
+	});
+
+	test('WorkspaceEntityIndex fast-paths cache rehydration using fs.stat without calling readFile', async () => {
+		const storageMap = new Map<string, any>();
+		const mockStorage = {
+			get: <T>(key: string): T | undefined => storageMap.get(key),
+			update: async (key: string, value: any): Promise<void> => {
+				if (value === undefined) {
+					storageMap.delete(key);
+				} else {
+					storageMap.set(key, value);
+				}
+			},
+		};
+
+		const userUri = vscode.Uri.parse('file:///StatUser.java');
+		const userText = `
+package com.example;
+@Entity
+public class StatUser {
+	@Id
+	private Long id;
+	private String name;
+}
+`;
+		const userDoc = {
+			uri: userUri,
+			languageId: 'java',
+			getText: () => userText,
+		} as any;
+
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(true);
+		index.setStorage(mockStorage);
+
+		// Seed cache with mock stat
+		const originalStat = (vscode.workspace as any).fs?.stat;
+		const originalReadFile = (vscode.workspace as any).fs?.readFile;
+		const originalFindFiles = vscode.workspace.findFiles;
+
+		(vscode.workspace as any).fs = {
+			stat: async () => ({ mtime: 99999, size: userText.length }),
+			readFile: async () => Buffer.from(userText, 'utf8'),
+		};
+		(vscode.workspace as any).findFiles = async () => [userUri];
+
+		index.updateDocument(userDoc);
+		// Force fileStat entry for userUri
+		(index as any).fileStats.set(userUri.toString(), { mtime: 99999, size: userText.length });
+		await index.persistCache();
+
+		// Clear memory index
+		index.clear(false);
+		assert.strictEqual(index.getAllEntities().length, 0);
+
+		// Now test fast path: readFile should NOT be invoked
+		let readFileInvoked = false;
+		(vscode.workspace as any).fs.readFile = async () => {
+			readFileInvoked = true;
+			return Buffer.from(userText, 'utf8');
+		};
+
+		await index.ensureInitialized();
+
+		assert.strictEqual(readFileInvoked, false, 'fs.readFile should not be called when fs.stat matches cache');
+		const loadedEntity = index.getEntity('StatUser');
+		assert.ok(loadedEntity, 'StatUser should be rehydrated from cache via stat fast-path');
+		assert.strictEqual(loadedEntity?.name, 'StatUser');
+
+		// Cleanup
+		index.clear(true);
+		index.setStorage(undefined);
+		(vscode.workspace as any).findFiles = originalFindFiles;
+		(vscode.workspace as any).fs.stat = originalStat;
+		(vscode.workspace as any).fs.readFile = originalReadFile;
+	});
+
+	test('WorkspaceEntityIndex accurately flags structural vs non-structural edits', () => {
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(true);
+
+		const entityUri = vscode.Uri.parse('file:///StructuralTest.java');
+		const docV1 = {
+			uri: entityUri,
+			languageId: 'java',
+			getText: () => 'package com.example; @Entity public class Item { @Id private Long id; }',
+		} as any;
+
+		index.updateDocument(docV1);
+		assert.strictEqual(index.didLastUpdateCauseStructuralChange(), true, 'Initial registration is structural');
+
+		// Non-structural edit: add comment inside class
+		const docV2 = {
+			uri: entityUri,
+			languageId: 'java',
+			getText: () => 'package com.example; @Entity public class Item { @Id private Long id; /* comment */ }',
+		} as any;
+
+		index.updateDocument(docV2);
+		assert.strictEqual(index.didLastUpdateCauseStructuralChange(), false, 'Adding comment should be non-structural');
+
+		// Structural edit: add new property
+		const docV3 = {
+			uri: entityUri,
+			languageId: 'java',
+			getText: () => 'package com.example; @Entity public class Item { @Id private Long id; private String sku; }',
+		} as any;
+
+		index.updateDocument(docV3);
+		assert.strictEqual(index.didLastUpdateCauseStructuralChange(), true, 'Adding property should be structural');
+	});
+
+	test('parseEntityModels fast-path extracts projectionTypes for non-entity classes without AST', () => {
+		const serviceSrc = `
+package com.example.service;
+public class OrderService {
+	public void process() {}
+}
+`;
+		const projectionTypes: ProjectionTypeInfo[] = [];
+		const entities = parseEntityModels(serviceSrc, vscode.Uri.parse('file:///OrderService.java'), projectionTypes);
+		assert.strictEqual(entities.length, 0, 'Service class has no entities');
+		assert.strictEqual(projectionTypes.length, 1);
+		assert.strictEqual(projectionTypes[0].name, 'OrderService');
+		assert.strictEqual(projectionTypes[0].packageName, 'com.example.service');
+		assert.strictEqual(projectionTypes[0].kind, 'class');
 	});
 });
 
