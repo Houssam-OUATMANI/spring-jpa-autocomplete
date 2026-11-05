@@ -5,6 +5,12 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 
+## [1.1.0] - 2026-11-05
+
+### Improved
+
+- **Derived query to JPQL conversion for nested properties** - The "Convert to @Query (JPQL)" refactoring now resolves camelCase paths such as `BooksDescription` to `books.description` using the indexed entity relationships. Explicit underscore paths continue to work, and nested `OrderBy` properties are also converted to JPQL paths.
+
 ## [1.0.7] - 2026-10-28
 
 ### Added
