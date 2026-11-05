@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDiscovery';
+import { extractRepositoryEntityNameAt, getIndexedEntities, WorkspaceEntityIndex } from '../entityDiscovery';
 import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
 import { parseJavaParameters } from '../javaParsing';
 
@@ -285,7 +285,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						parameters: parseJavaParameters(paramsText),
 						startOffset: 0,
 						endOffset: methodMatch[0].length,
-					}, repoEntityName);
+					}, repoEntityName, getIndexedEntities(document));
 
 					if (converted) {
 						const action = new vscode.CodeAction(

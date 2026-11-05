@@ -1,5 +1,7 @@
 import { parseDerivedMethodName, ParsedPredicate } from './queryParser';
 import { MethodSignatureInfo } from './queryValidator';
+import { EntityInfo } from '../entityModel';
+import { resolveDerivedPropertyPath } from '../entityDiscovery';
 
 export interface ConvertedJpqlResult {
 	readonly jpqlQuery: string;
@@ -10,6 +12,7 @@ export interface ConvertedJpqlResult {
 export function convertDerivedQueryToJpql(
 	signature: MethodSignatureInfo,
 	entityName: string,
+	entities: readonly EntityInfo[] = [],
 ): ConvertedJpqlResult | undefined {
 	const parsed = parseDerivedMethodName(signature.methodName);
 	if (!parsed) {
@@ -43,9 +46,10 @@ export function convertDerivedQueryToJpql(
 
 	for (let i = 0; i < parsed.predicates.length; i++) {
 		const pred = parsed.predicates[i];
-		const propPath = pred.propertyName.includes('_')
-			? pred.propertyName.split('_').map((seg, idx) => idx === 0 ? uncapitalize(seg) : seg).join('.')
-			: uncapitalize(pred.propertyName);
+		const propPath = resolveDerivedPropertyPath(entityName, pred.propertyName, entities)
+			?? (pred.propertyName.includes('_')
+				? pred.propertyName.split('_').map(uncapitalize).join('.')
+				: uncapitalize(pred.propertyName));
 		const fullPath = `${alias}.${propPath}`;
 
 		const condition = formatPredicateCondition(fullPath, pred, normalParams, paramIndex);
@@ -67,7 +71,10 @@ export function convertDerivedQueryToJpql(
 	}
 
 	if (parsed.orderBy.length > 0) {
-		const orderClauses = parsed.orderBy.map((o) => `${alias}.${uncapitalize(o.propertyName)} ${o.direction.toUpperCase()}`);
+		const orderClauses = parsed.orderBy.map((order) => {
+			const propPath = resolveDerivedPropertyPath(entityName, order.propertyName, entities) ?? uncapitalize(order.propertyName);
+			return `${alias}.${propPath} ${order.direction.toUpperCase()}`;
+		});
 		query += ` ORDER BY ${orderClauses.join(', ')}`;
 	}
 

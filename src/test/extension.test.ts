@@ -1427,6 +1427,72 @@ suite('Extension Test Suite', () => {
 		assert.ok(result.requiredImports.includes('org.springframework.data.jpa.repository.Query'));
 	});
 
+	test('converts camelCase nested derived properties to JPQL association paths', () => {
+		const uri = vscode.Uri.parse('file:///User.java');
+		const entities = [
+			{
+				name: 'User',
+				uri,
+				isEntity: true,
+				properties: [
+					{ name: 'username', type: 'String' },
+					{ name: 'books', type: 'List<Book>', relation: 'OneToMany' as const },
+				],
+			},
+			{
+				name: 'Book',
+				uri: vscode.Uri.parse('file:///Book.java'),
+				isEntity: true,
+				properties: [{ name: 'description', type: 'String' }],
+			},
+		];
+		const result = convertDerivedQueryToJpql({
+			rawText: 'Optional<User> findByUsernameOrBooksDescription(String username, String booksDescription);',
+			methodName: 'findByUsernameOrBooksDescription',
+			returnType: 'Optional<User>',
+			entityName: 'User',
+			parameters: [{ name: 'username', type: 'String' }, { name: 'booksDescription', type: 'String' }],
+			startOffset: 0,
+			endOffset: 90,
+		}, 'User', entities);
+
+		assert.ok(result);
+		assert.strictEqual(
+			result.jpqlQuery,
+			'SELECT u FROM User u WHERE u.username = :username OR u.books.description = :booksDescription',
+		);
+	});
+
+	test('converts underscore nested derived properties to JPQL association paths', () => {
+		const uri = vscode.Uri.parse('file:///User.java');
+		const entities = [
+			{
+				name: 'User',
+				uri,
+				isEntity: true,
+				properties: [{ name: 'books', type: 'List<Book>', relation: 'OneToMany' as const }],
+			},
+			{
+				name: 'Book',
+				uri: vscode.Uri.parse('file:///Book.java'),
+				isEntity: true,
+				properties: [{ name: 'description', type: 'String' }],
+			},
+		];
+		const result = convertDerivedQueryToJpql({
+			rawText: 'Optional<User> findByBooks_Description(String booksDescription);',
+			methodName: 'findByBooks_Description',
+			returnType: 'Optional<User>',
+			entityName: 'User',
+			parameters: [{ name: 'booksDescription', type: 'String' }],
+			startOffset: 0,
+			endOffset: 63,
+		}, 'User', entities);
+
+		assert.ok(result);
+		assert.strictEqual(result.jpqlQuery, 'SELECT u FROM User u WHERE u.books.description = :booksDescription');
+	});
+
 	test('converts deleteBy derived query method to modifying JPQL @Query', () => {
 		const result = convertDerivedQueryToJpql({
 			rawText: 'void deleteByEmail(String email);',
@@ -2149,4 +2215,3 @@ public class OrderService {
 		assert.strictEqual(projectionTypes[0].kind, 'class');
 	});
 });
-

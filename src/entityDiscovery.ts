@@ -828,6 +828,91 @@ export function resolveEntityPropertyPathWithOwner(
 	return resolved && owner ? { property: resolved, owner } : undefined;
 }
 
+export function resolveDerivedPropertyPath(
+	entityName: string,
+	derivedPropertyName: string,
+	entities: readonly EntityInfo[],
+): string | undefined {
+	const entityLookup = createEntityLookup(entities);
+	const rootEntity = entityLookup.get(entityName.toLowerCase());
+	if (!rootEntity) {
+		return undefined;
+	}
+
+	if (derivedPropertyName.includes('_')) {
+		const path: string[] = [];
+		let currentEntity = rootEntity;
+		const segments = derivedPropertyName.split('_');
+		for (let index = 0; index < segments.length; index++) {
+			const propertyName = uncapitalize(segments[index]);
+			const current = resolveEntityHierarchy(currentEntity, entityLookup);
+			const property = current.properties.find((candidate) => candidate.name.toLowerCase() === propertyName.toLowerCase());
+			if (!property) {
+				return undefined;
+			}
+			path.push(property.name);
+			if (index < segments.length - 1) {
+				const nextEntity = resolvePropertyEntity(property, entityLookup);
+				if (!nextEntity) {
+					return undefined;
+				}
+				currentEntity = nextEntity;
+			}
+		}
+		return path.join('.');
+	}
+
+	const resolveCamelPath = (entity: EntityInfo, remaining: string, ancestors: ReadonlySet<string>): string | undefined => {
+		const current = resolveEntityHierarchy(entity, entityLookup);
+		const direct = current.properties.find((property) => capitalize(property.name) === remaining);
+		if (direct) {
+			return direct.name;
+		}
+
+		for (const property of current.properties) {
+			const prefix = capitalize(property.name);
+			if (!remaining.startsWith(prefix) || remaining.length === prefix.length) {
+				continue;
+			}
+			const nextEntity = resolvePropertyEntity(property, entityLookup);
+			if (!nextEntity) {
+				continue;
+			}
+			const entityKey = `${nextEntity.uri.toString()}:${nextEntity.name}`;
+			if (ancestors.has(entityKey)) {
+				continue;
+			}
+			const nestedPath = resolveCamelPath(nextEntity, remaining.slice(prefix.length), new Set(ancestors).add(entityKey));
+			if (nestedPath) {
+				return `${property.name}.${nestedPath}`;
+			}
+		}
+		return undefined;
+	};
+
+	const rootKey = `${rootEntity.uri.toString()}:${rootEntity.name}`;
+	return resolveCamelPath(rootEntity, derivedPropertyName, new Set([rootKey]));
+}
+
+function resolvePropertyEntity(
+	property: EntityProperty,
+	entitiesByName: ReadonlyMap<string, EntityInfo>,
+): EntityInfo | undefined {
+	if (property.targetEntity) {
+		const target = findEntityByName(entitiesByName, property.targetEntity);
+		if (target) {
+			return target;
+		}
+	}
+	const referencedName = referencedEntityNames(property.type)
+		.find((name) => findEntityByName(entitiesByName, name));
+	return referencedName ? findEntityByName(entitiesByName, referencedName) : undefined;
+}
+
 function capitalize(value: string): string {
 	return value[0].toUpperCase() + value.slice(1);
+}
+
+function uncapitalize(value: string): string {
+	return value.length > 0 ? value[0].toLowerCase() + value.slice(1) : value;
 }
