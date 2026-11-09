@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
-import { findMongoFieldAt, isMongoRepositoryAt } from '../mongoSupport';
+import { findMongoFieldAt, findMongoTemplateFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
 
 export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 	public async provideDefinition(
@@ -36,10 +36,14 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		const docText = document.getText();
 		const offset = document.offsetAt(position);
 		const mongoField = findMongoFieldAt(docText, offset, entities);
-		if (mongoField?.property.location) {
+		const mongoTemplateField = findMongoTemplateFieldAccesses(docText, entities).find((field) =>
+			offset >= field.startOffset && offset <= field.endOffset,
+		);
+		const mongoFieldLocation = mongoField ?? mongoTemplateField;
+		if (mongoFieldLocation?.property.location) {
 			return new vscode.Location(
-				mongoField.entity.uri,
-				new vscode.Position(mongoField.property.location.line, mongoField.property.location.character),
+				mongoFieldLocation.entity.uri,
+				new vscode.Position(mongoFieldLocation.property.location.line, mongoFieldLocation.property.location.character),
 			);
 		}
 		const jpqlQueries = extractAllJpqlQueries(docText, entities);

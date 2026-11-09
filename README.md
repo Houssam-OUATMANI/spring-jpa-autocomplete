@@ -93,12 +93,23 @@ class UserDocument {
 interface UserRepository extends MongoRepository<UserDocument, String> {
   List<UserDocument> findByDisplayNameStartingWith(String prefix);
 
-  @Query("{ 'emial': ?0 }")
-  List<UserDocument> findByEmail(String email);
+  @Query("""
+      {
+        '$and': [
+          { 'title': { '$regex': ?0, '$options': 'i' } },
+          { 'content': { '$regex': ?1, '$options': 'i' } }
+        ]
+      }
+      """)
+  List<UserDocument> search(String title, String content);
 }
 ```
 
-Mongo document fields power derived-query completion. Mongo `@Query` and `@Aggregation` strings complete mapped document keys, honor `@Field` names, and report unknown keys. Mongo field diagnostics can be configured independently with `springJpa.diagnostics.mongoQueries`. This initial MongoDB support covers repositories and annotation-based query strings; `MongoTemplate` / Criteria completion is not included yet.
+Mongo document fields power derived-query completion. Inside Mongo `@Query` and `@Aggregation` strings, completion suggests mapped field paths, logical operators, and operators such as `$regex`, `$options`, `$gte`, `$in`, and `$elemMatch`; entries include syntax and examples. Hover an operator for its MongoDB documentation. Diagnostics check unknown fields and operators, offer typo fixes, and catch unmatched quotes or braces. `@Field` names and nested paths are respected.
+
+The **Convert to @Query (MongoDB)** refactoring converts supported derived repository methods into Mongo JSON queries with positional parameters, mapped `@Field` names, regex flags for case-insensitive substring matching, sort metadata, and `count` / `exists` / `delete` options. It is not offered when modifiers or predicates cannot be represented without changing the method's behavior.
+
+`MongoTemplate` and `ReactiveMongoTemplate` Criteria fields are completed and validated when the method's template operation identifies its document type. Mongo query diagnostics can be configured independently with `springJpa.diagnostics.mongoQueries`.
 
 ## Feature Reference
 
@@ -149,7 +160,7 @@ Mongo document fields power derived-query completion. Mongo `@Query` and `@Aggre
 - **Native SQL support**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with SQL syntax highlighting and table / mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.
   - SQL dialect awareness for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
   - Auto-detection from Spring/Hibernate settings and JDBC URLs, with a workspace-level override and a per-file override for active native queries.
-- **Spring Data MongoDB**: indexes `@Document` types separately from JPA entities, supports synchronous and reactive Mongo repositories, suggests derived-query operators and mapped fields in `@Query` / `@Aggregation`, and diagnoses unknown Mongo query keys.
+- **Spring Data MongoDB**: indexes `@Document` types separately from JPA entities, supports synchronous and reactive Mongo repositories, suggests derived-query operators and mapped fields in `@Query` / `@Aggregation` and MongoTemplate Criteria operations, documents Mongo operators inline and on hover, and diagnoses unknown fields/operators and malformed query structure.
   - Supports mapped and dotted nested field paths, `F12`, references, rename edits for unmapped keys, and a typo Quick Fix.
 - **IDE Navigation & Refactoring (`F12`, `F2`, `Shift+F12`)**:
   - **Go to Definition (`F12`)**:
@@ -165,7 +176,8 @@ Mongo document fields power derived-query completion. Mongo `@Query` and `@Aggre
     - CodeLens above JPA entities linking directly to the corresponding Spring Data Repositories (`Open Spring Data Repository`).
 - **Quick-Fixes & Refactorings (`Alt+Enter` / Lightbulb)**:
   - **Create field in Entity**: when typing a derived query method with an unmapped property (e.g. `findByPhoneNumber(String phone)`), generates the private field and accessors directly into the entity class.
-  - **Convert to @Query (JPQL)**: converts any derived query method into its equivalent JPQL `@Query` annotation with mapped operators, `ORDER BY`, `@Param`, and `@Modifying` if needed.
+  - **Convert to @Query (JPQL)**: converts supported JPA derived methods into their equivalent JPQL `@Query` annotation with mapped operators, `ORDER BY`, `@Param`, and `@Modifying` if needed.
+  - **Convert to @Query (MongoDB)**: converts representable Mongo derived methods into a Mongo JSON query with positional parameters, mapped `@Field` names, regex options, sorting, and count / exists / delete annotation options.
   - Add every missing derived-query parameter in one action.
   - Fix incompatible return type (`boolean`, `long`, `int`, `void`).
   - Add missing `@Modifying` annotation to `UPDATE` / `DELETE` queries with automatic import.

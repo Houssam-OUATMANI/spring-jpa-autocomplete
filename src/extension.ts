@@ -18,7 +18,7 @@ import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
 import { createEntityGraphCompletions, validateEntityGraphs } from './entityGraph/entityGraphSupport';
-import { createMongoQueryCompletions, isMongoRepositoryAt, validateMongoQueries } from './mongoSupport';
+import { createMongoQueryCompletions, createMongoTemplateCompletions, isMongoRepositoryAt, validateMongoQueries, validateMongoTemplateQueries } from './mongoSupport';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -285,6 +285,11 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 				const entities = getIndexedEntities(document);
 
+				const mongoTemplateItems = createMongoTemplateCompletions(document, position, entities);
+				if (mongoTemplateItems && mongoTemplateItems.length > 0) {
+					return mongoTemplateItems;
+				}
+
 				// A. EntityGraph completion
 				if (/@EntityGraph\b/.test(docText)) {
 					const entityGraphItems = createEntityGraphCompletions(document, position, entities.filter((entity) => !entity.isMongoDocument));
@@ -414,9 +419,10 @@ export function activate(context: vscode.ExtensionContext) {
 			&& /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
 		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
 		const hasMongoQueries = mongoMode !== 'off' && /@(Query|Aggregation)\s*\(/.test(docText) && /(?:MongoRepository|ReactiveMongoRepository)\s*</.test(docText);
+		const hasMongoTemplate = mongoMode !== 'off' && /\b(?:Reactive)?MongoTemplate\b/.test(docText) && /\bCriteria\s*\.\s*where\s*\(/.test(docText);
 		const hasEntityGraphs = jpqlMode !== 'off' && /@EntityGraph\s*\(/.test(docText);
 		const hasEntities = derivedMode !== 'off' && /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId)\b/.test(docText);
-		if (!isRepo && !hasJpqlQueries && !hasMongoQueries && !hasEntities && !hasEntityGraphs) {
+		if (!isRepo && !hasJpqlQueries && !hasMongoQueries && !hasMongoTemplate && !hasEntities && !hasEntityGraphs) {
 			diagnostics.set(document.uri, documentDiagnostics);
 			return;
 		}
@@ -429,7 +435,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const methodRegex = /\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)\s*(?:throws\s+[\w$.,\s]+)?;/g;
 			let methodMatch: RegExpExecArray | null;
 			const knownEntityNames = entities
-				.filter((entity) => entity.isEntity)
+				.filter((entity) => entity.isEntity || entity.isMongoDocument)
 				.flatMap((entity) => [entity.name, entity.entityName].filter((name): name is string => Boolean(name)));
 			const propertiesByEntity = new Map<string | undefined, ReturnType<typeof findEntityProperties>>();
 
@@ -530,24 +536,43 @@ export function activate(context: vscode.ExtensionContext) {
 					documentDiagnostics.push(diagnostic);
 				}
 			}
+		}
 
-			if (hasMongoQueries) {
-				for (const diag of validateMongoQueries(docText, entities)) {
-					if (!shouldDisplayDiagnostic(mongoMode, 'error')) {
-						continue;
-					}
-					const diagnostic = new vscode.Diagnostic(
-						new vscode.Range(document.positionAt(diag.startOffset), document.positionAt(diag.endOffset)),
-						diag.message,
-						vscode.DiagnosticSeverity.Error,
-					);
-					diagnostic.source = 'spring-jpa';
-					diagnostic.code = diag.code;
-					if (diag.suggestedProperty) {
-						(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = diag.suggestedProperty;
-					}
-					documentDiagnostics.push(diagnostic);
+		if (hasMongoQueries) {
+			for (const diag of validateMongoQueries(docText, entities)) {
+				if (!shouldDisplayDiagnostic(mongoMode, 'error')) {
+					continue;
 				}
+				const diagnostic = new vscode.Diagnostic(
+					new vscode.Range(document.positionAt(diag.startOffset), document.positionAt(diag.endOffset)),
+					diag.message,
+					vscode.DiagnosticSeverity.Error,
+				);
+				diagnostic.source = 'spring-jpa';
+				diagnostic.code = diag.code;
+				if (diag.suggestedProperty) {
+					(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = diag.suggestedProperty;
+				}
+				documentDiagnostics.push(diagnostic);
+			}
+		}
+
+		if (hasMongoTemplate) {
+			for (const diag of validateMongoTemplateQueries(docText, entities)) {
+				if (!shouldDisplayDiagnostic(mongoMode, 'error')) {
+					continue;
+				}
+				const diagnostic = new vscode.Diagnostic(
+					new vscode.Range(document.positionAt(diag.startOffset), document.positionAt(diag.endOffset)),
+					diag.message,
+					vscode.DiagnosticSeverity.Error,
+				);
+				diagnostic.source = 'spring-jpa';
+				diagnostic.code = diag.code;
+				if (diag.suggestedProperty) {
+					(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = diag.suggestedProperty;
+				}
+				documentDiagnostics.push(diagnostic);
 			}
 		}
 

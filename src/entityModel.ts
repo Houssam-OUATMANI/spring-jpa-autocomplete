@@ -261,7 +261,7 @@ function extractClassProperties(text: string, maskedText: string, bodyStart: num
 		const name = field[3];
 		const nameOffset = memberOffset + maskedMember.lastIndexOf(name);
 		const targetEntity = annotations.match(/targetEntity\s*=\s*([A-Z]\w*)\.class/)?.[1];
-		const mongoFieldName = member.match(/@(?:[\w$.]+\.)*Field\s*\(\s*(?:value\s*=\s*)?"([^"]+)"/)?.[1];
+		const mongoFieldName = member.match(/@(?:[\w$.]+\.)*Field\s*\(\s*(?:(?:value|name)\s*=\s*)?"([^"]+)"/)?.[1];
 		properties.set(name, {
 			name,
 			type,

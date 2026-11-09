@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { createEntityLookup, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
+import { getMongoOperatorAt } from '../mongoSupport';
+import { formatMongoOperatorDocumentation, getMongoOperatorDocumentation } from '../mongoQueryLanguage';
 
 export class SpringJpaHoverProvider implements vscode.HoverProvider {
 	public async provideHover(
@@ -12,6 +14,16 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
 		const entities = index.getAllEntities();
+		const offset = document.offsetAt(position);
+		const mongoOperator = getMongoOperatorAt(document.getText(), offset, entities);
+		if (mongoOperator) {
+			const documentation = getMongoOperatorDocumentation(mongoOperator.name);
+			if (documentation) {
+				const range = new vscode.Range(document.positionAt(mongoOperator.startOffset), document.positionAt(mongoOperator.endOffset));
+				return new vscode.Hover(new vscode.MarkdownString(formatMongoOperatorDocumentation(documentation)), range);
+			}
+		}
+
 		const wordRange = document.getWordRangeAtPosition(position);
 		if (!wordRange) {
 			return undefined;
@@ -23,7 +35,6 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 			return new vscode.Hover(new vscode.MarkdownString(`**JPA entity** ${entity.name}\n\n${entity.properties.length} properties\n\n${entity.uri.fsPath}`), wordRange);
 		}
 
-		const offset = document.offsetAt(position);
 		const query = extractAllJpqlQueries(document.getText(), entities).find(
 			(candidate) => offset >= candidate.queryStartOffset && offset <= candidate.queryEndOffset,
 		);

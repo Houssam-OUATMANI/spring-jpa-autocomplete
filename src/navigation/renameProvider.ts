@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
-import { findMongoFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
+import { findMongoFieldAccesses, findMongoTemplateFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
 
 export class SpringJpaRenameProvider implements vscode.RenameProvider {
 	public prepareRename(
@@ -63,7 +63,7 @@ export class SpringJpaRenameProvider implements vscode.RenameProvider {
 			}
 			const text = doc.getText();
 
-			for (const access of findMongoFieldAccesses(text, allEntities)) {
+			for (const access of [...findMongoFieldAccesses(text, allEntities), ...findMongoTemplateFieldAccesses(text, allEntities)]) {
 				if (access.entity.uri.toString() === entity.uri.toString()
 					&& access.property.name.toLowerCase() === oldName.toLowerCase()
 					&& !access.property.mongoFieldName) {

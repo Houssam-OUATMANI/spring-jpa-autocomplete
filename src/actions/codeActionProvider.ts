@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { extractRepositoryEntityNameAt, getIndexedEntities, WorkspaceEntityIndex } from '../entityDiscovery';
 import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
-import { parseJavaParameters } from '../javaParsing';
+import { convertDerivedQueryToMongoQuery } from '../derivedQuery/queryToMongo';
+import { maskJavaSource, parseJavaParameters } from '../javaParsing';
 import { isMongoRepositoryAt } from '../mongoSupport';
 
 interface SpringJpaDiagnostic extends vscode.Diagnostic {
@@ -209,11 +210,13 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						actions.push(fixAll);
 					}
 				}
-			} else if (code === 'UNKNOWN_PROPERTY' || code === 'UNKNOWN_MONGO_FIELD') {
+			} else if (code === 'UNKNOWN_PROPERTY' || code === 'UNKNOWN_MONGO_FIELD' || code === 'UNKNOWN_MONGO_OPERATOR') {
 				const suggestedProperty = springDiagnostic.suggestedProperty ?? diagnostic.message.match(/Did you mean '([^']+)'\?/)?.[1];
 				if (suggestedProperty) {
 					const action = new vscode.CodeAction(
-						`Rename property to '${suggestedProperty}'`,
+						code === 'UNKNOWN_MONGO_OPERATOR'
+							? `Rename MongoDB operator to '${suggestedProperty}'`
+							: `Rename property to '${suggestedProperty}'`,
 						vscode.CodeActionKind.QuickFix,
 					);
 					action.edit = new vscode.WorkspaceEdit();
@@ -266,7 +269,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 			}
 		}
 
-		// 2. Refactoring Code Action: Convert Derived Query Method to @Query JPQL
+		// 2. Refactoring Code Action: Convert a supported derived query to backend-specific @Query syntax
 		if (typeof document.lineAt === 'function' && typeof document.getText === 'function') {
 			const lineText = document.lineAt(range.start.line).text;
 			const methodMatch = lineText.match(/\b([\w$<>?[\]\s]+?)\s+((?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+)\s*\(([\s\S]*?)\)/);
@@ -276,9 +279,22 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 				const paramsText = methodMatch[3];
 				const docText = document.getText();
 				const offset = typeof document.offsetAt === 'function' ? document.offsetAt(range.start) : 0;
+				const methodStartOffset = (typeof document.offsetAt === 'function'
+					? document.offsetAt(new vscode.Position(range.start.line, 0))
+					: 0) + (methodMatch.index ?? 0);
 				const repoEntityName = extractRepositoryEntityNameAt(docText, offset);
-				if (repoEntityName && !isMongoRepositoryAt(docText, offset)) {
-					const converted = convertDerivedQueryToJpql({
+				const isMongoRepository = isMongoRepositoryAt(docText, offset);
+				const maskedBeforeMethod = maskJavaSource(docText.slice(0, methodStartOffset));
+				const declarationStart = Math.max(
+					maskedBeforeMethod.lastIndexOf(';'),
+					maskedBeforeMethod.lastIndexOf('{'),
+					maskedBeforeMethod.lastIndexOf('}'),
+				) + 1;
+				const hasExistingQueryAnnotation = /@(?:Query|Aggregation)\b/.test(
+					maskJavaSource(docText.slice(declarationStart, methodStartOffset)),
+				);
+				if (repoEntityName && !hasExistingQueryAnnotation) {
+					const signature = {
 						rawText: methodMatch[0],
 						returnType,
 						methodName,
@@ -286,17 +302,21 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						parameters: parseJavaParameters(paramsText),
 						startOffset: 0,
 						endOffset: methodMatch[0].length,
-					}, repoEntityName, getIndexedEntities(document));
+					};
+					const converted = isMongoRepository
+						? convertDerivedQueryToMongoQuery(signature, repoEntityName, getIndexedEntities(document), docText)
+						: convertDerivedQueryToJpql(signature, repoEntityName, getIndexedEntities(document));
 
 					if (converted) {
 						const action = new vscode.CodeAction(
-							`Convert '${methodName}' to @Query (JPQL)`,
+							`Convert '${methodName}' to @Query (${isMongoRepository ? 'MongoDB' : 'JPQL'})`,
 							vscode.CodeActionKind.Refactor,
 						);
 						action.edit = new vscode.WorkspaceEdit();
 						const indent = lineText.match(/^\s*/)?.[0] ?? '\t';
-						const modifyingAnnotation = converted.isModifying ? `${indent}@Modifying\n` : '';
-						const queryAnnotation = `${modifyingAnnotation}${indent}@Query("${converted.jpqlQuery}")\n`;
+						const queryAnnotation = 'mongoQuery' in converted
+							? `${indent}@Query(value = "${converted.mongoQuery}"${converted.annotationOptions.length > 0 ? `, ${converted.annotationOptions.join(', ')}` : ''})\n`
+							: `${converted.isModifying ? `${indent}@Modifying\n` : ''}${indent}@Query("${converted.jpqlQuery}")\n`;
 						action.edit.insert(document.uri, new vscode.Position(range.start.line, 0), queryAnnotation);
 
 						for (const imp of converted.requiredImports) {

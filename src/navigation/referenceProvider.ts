@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
-import { findMongoFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
+import { findMongoFieldAccesses, findMongoTemplateFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
 
 export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 	public async provideReferences(
@@ -47,7 +47,7 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 			}
 			const text = doc.getText();
 
-			for (const access of findMongoFieldAccesses(text, allEntities)) {
+			for (const access of [...findMongoFieldAccesses(text, allEntities), ...findMongoTemplateFieldAccesses(text, allEntities)]) {
 				if (access.entity.uri.toString() === entity.uri.toString()
 					&& access.property.name.toLowerCase() === property.name.toLowerCase()) {
 					references.push(new vscode.Location(

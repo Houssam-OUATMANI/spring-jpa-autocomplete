@@ -23,10 +23,11 @@ import { maskJavaSource } from '../javaParsing';
 import { detectSqlDialect, resolveSqlDialect, setDocumentSqlDialect } from '../jpql/sqlDialect';
 import { validateJpaEntities } from '../entityValidator';
 import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
+import { convertDerivedQueryToMongoQuery } from '../derivedQuery/queryToMongo';
 import { SpringJpaReferenceProvider } from '../navigation/referenceProvider';
 import { SpringJpaRenameProvider } from '../navigation/renameProvider';
 import { createEntityGraphCompletions, validateEntityGraphs } from '../entityGraph/entityGraphSupport';
-import { createMongoQueryCompletions, findMongoFieldAccesses, isMongoRepositoryAt, validateMongoQueries } from '../mongoSupport';
+import { createMongoQueryCompletions, createMongoTemplateCompletions, findMongoFieldAccesses, getMongoOperatorAt, isMongoRepositoryAt, validateMongoQueries, validateMongoTemplateQueries } from '../mongoSupport';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -112,6 +113,60 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
+	test('offers the MongoDB @Query refactoring for derived Mongo repository methods', () => {
+		const source = [
+			'package example;',
+			'@Document class UserDocument { @Field("display_name") String displayName; }',
+			'interface UserMongoRepository extends MongoRepository<UserDocument, String> {',
+			'  List<UserDocument> findByDisplayName(String displayName);',
+			'}',
+		].join('\n');
+		const uri = vscode.Uri.parse('file:///MongoRefactoringRepository.java');
+		const lineStarts = [0];
+		for (let index = 0; index < source.length; index++) {
+			if (source[index] === '\n') {
+				lineStarts.push(index + 1);
+			}
+		}
+		const document = {
+			uri,
+			languageId: 'java',
+			getText: () => source,
+			lineAt: (line: number) => ({ text: source.split('\n')[line] }),
+			offsetAt: (position: vscode.Position) => lineStarts[position.line] + position.character,
+			positionAt: (offset: number) => {
+				let line = 0;
+				while (line + 1 < lineStarts.length && lineStarts[line + 1] <= offset) {
+					line++;
+				}
+				return new vscode.Position(line, offset - lineStarts[line]);
+			},
+		} as vscode.TextDocument;
+		const index = WorkspaceEntityIndex.getInstance();
+		index.updateDocument(document);
+		try {
+			const methodLine = 3;
+			const range = new vscode.Range(new vscode.Position(methodLine, 2), new vscode.Position(methodLine, 6));
+			const actions = new SpringJpaCodeActionProvider().provideCodeActions(
+				document,
+				range,
+				{
+					diagnostics: [],
+					triggerKind: 1,
+					only: undefined,
+				},
+				{} as vscode.CancellationToken,
+			);
+			const action = actions.find((candidate) => candidate.title.includes('@Query (MongoDB)'));
+			assert.ok(action);
+			const edits = action.edit?.entries().flatMap(([, uriEdits]) => uriEdits) ?? [];
+			assert.ok(edits.some((edit) => edit.newText.includes(`@Query(value = "{ 'display_name': ?0 }")`)));
+			assert.ok(edits.some((edit) => edit.newText.includes('org.springframework.data.mongodb.repository.Query')));
+		} finally {
+			index.removeUri(uri);
+		}
+	});
+
 	test('skips classes with the word record in comments or variables without declaring a record', () => {
 		const uri = vscode.Uri.parse('file:///RecordService.java');
 		const code = `
@@ -157,6 +212,13 @@ suite('Extension Test Suite', () => {
 		assert.deepStrictEqual(extractRepositoryEntityNames(source), ['UserDocument', 'User']);
 	});
 
+	test('supports Mongo repositories whose interface name does not end in Repository', () => {
+		const header = 'interface UserStore extends MongoRepository<UserDocument, String>';
+		assert.strictEqual(isRepositoryDeclarationHeader(header), true);
+		assert.strictEqual(isRepositoryMethodContext(`${header} {\n\tfindBy`), true);
+		assert.strictEqual(isRepositoryMethodContext('class UserService {\n\tfindBy'), false);
+	});
+
 	test('completes mapped Mongo fields inside @Query and diagnoses misspelled document keys', () => {
 		const entity = parseEntityModelAst(
 			'@Document class UserDocument { String email; @Field("display_name") String displayName; }',
@@ -183,6 +245,180 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(fieldAccess.entity.name, 'UserDocument');
 	});
 
+	test('completes Mongo operators with inline documentation inside field predicates', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String title; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'title': { '$re': ?0 } }") List<UserDocument> search(String title); }`;
+		const document = {
+			getText: () => source,
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as vscode.TextDocument;
+		const cursor = source.indexOf('$re') + '$re'.length;
+		const completions = createMongoQueryCompletions(document, new vscode.Position(0, cursor), [entity]);
+		const regexCompletion = completions?.find((item) => item.label === '$regex');
+		assert.ok(regexCompletion);
+		assert.match(regexCompletion.detail ?? '', /MongoDB Evaluation operator/);
+		assert.ok(regexCompletion.documentation);
+
+		const optionsSource = source.replace("'$re'", "'$options': 'i'");
+		const optionsDocument = {
+			getText: () => optionsSource,
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as vscode.TextDocument;
+		const optionCursor = optionsSource.indexOf("'i'") + 1;
+		const options = createMongoQueryCompletions(optionsDocument, new vscode.Position(0, optionCursor), [entity]);
+		assert.ok(options?.some((item) => item.label === 'i'));
+		assert.ok(options?.some((item) => item.label === 'm'));
+	});
+
+	test('diagnoses unknown Mongo operators and malformed query structure', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String email; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const unknownOperatorSource = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'email': { '$rgex': ?0 } }") List<UserDocument> search(String email); }`;
+		const operatorDiagnostic = validateMongoQueries(unknownOperatorSource, [entity])
+			.find((diagnostic) => diagnostic.code === 'UNKNOWN_MONGO_OPERATOR');
+		assert.ok(operatorDiagnostic);
+		assert.match(operatorDiagnostic.message, /Unknown MongoDB operator '\$rgex'.*'\$regex'/);
+		assert.strictEqual(
+			unknownOperatorSource.slice(operatorDiagnostic.startOffset, operatorDiagnostic.endOffset),
+			'$rgex',
+		);
+
+		const malformedSource = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'email': ?0") List<UserDocument> search(String email); }`;
+		const structureDiagnostic = validateMongoQueries(malformedSource, [entity])
+			.find((diagnostic) => diagnostic.code === 'INVALID_MONGO_QUERY');
+		assert.ok(structureDiagnostic);
+		assert.match(structureDiagnostic.message, /Unclosed '\{'/);
+
+		const invalidOptionsSource = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'email': { '$regex': ?0, '$options': 'q' } }") List<UserDocument> search(String email); }`;
+		const optionsDiagnostic = validateMongoQueries(invalidOptionsSource, [entity])
+			.find((diagnostic) => diagnostic.message.includes('Unsupported MongoDB regex option'));
+		assert.ok(optionsDiagnostic);
+		assert.strictEqual(invalidOptionsSource.slice(optionsDiagnostic.startOffset, optionsDiagnostic.endOffset), 'q');
+	});
+
+	test('offers Mongo operator documentation at the operator in a repository query', () => {
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'title': { '$regex': ?0 } }") List<UserDocument> search(String title); }`;
+		const offset = source.indexOf('$regex') + 2;
+		assert.deepStrictEqual(
+			getMongoOperatorAt(source, offset, []),
+			{ name: '$regex', startOffset: source.indexOf('$regex'), endOffset: source.indexOf('$regex') + '$regex'.length },
+		);
+	});
+
+	test('converts Mongo derived queries to mapped @Query filters and annotation options', () => {
+		const entity = parseEntityModelAst(
+			'@Document class Article { @Field("headline") String title; String content; boolean published; }',
+			vscode.Uri.parse('file:///Article.java'),
+		)!;
+		const result = convertDerivedQueryToMongoQuery({
+			rawText: 'List<Article> findByTitleContainingIgnoreCaseAndContentContainingIgnoreCase(String title, String content);',
+			methodName: 'findByTitleContainingIgnoreCaseAndContentContainingIgnoreCase',
+			returnType: 'List<Article>',
+			entityName: 'Article',
+			parameters: [{ name: 'title', type: 'String' }, { name: 'content', type: 'String' }],
+			startOffset: 0,
+			endOffset: 100,
+		}, 'Article', [entity]);
+		assert.ok(result);
+		assert.strictEqual(
+			result.mongoQuery,
+			"{ '$and': [ { 'headline': { '$regex': ?0, '$options': 'i' } }, { 'content': { '$regex': ?1, '$options': 'i' } } ] }",
+		);
+		assert.ok(result.requiredImports.includes('org.springframework.data.mongodb.repository.Query'));
+
+		const countResult = convertDerivedQueryToMongoQuery({
+			rawText: 'long countByPublishedTrueOrderByTitleDesc();',
+			methodName: 'countByPublishedTrueOrderByTitleDesc',
+			returnType: 'long',
+			entityName: 'Article',
+			parameters: [],
+			startOffset: 0,
+			endOffset: 44,
+		}, 'Article', [entity]);
+		assert.deepStrictEqual(countResult?.annotationOptions, ['count = true', 'sort = "{ \'headline\': -1 }"']);
+		assert.strictEqual(
+			convertDerivedQueryToMongoQuery({
+				rawText: 'List<Article> findTop5ByTitle(String title);',
+				methodName: 'findTop5ByTitle',
+				returnType: 'List<Article>',
+				entityName: 'Article',
+				parameters: [{ name: 'title', type: 'String' }],
+				startOffset: 0,
+				endOffset: 45,
+			}, 'Article', [entity]),
+			undefined,
+		);
+	});
+
+	test('validates unquoted Mongo keys and ignores Mongo operator keys', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String email; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ $and: [{ emial: ?0 }] }") List<UserDocument> findUsers(String email); }`;
+		const diagnostics = validateMongoQueries(source, [entity]);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.match(diagnostics[0].message, /Unknown MongoDB document field 'emial'.*email/);
+		assert.strictEqual(diagnostics[0].startOffset, source.indexOf('emial'));
+	});
+
+	test('avoids Mongo field diagnostics when a repository document is not indexed', () => {
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'emial': ?0 }") List<UserDocument> findUsers(String email); }`;
+		assert.deepStrictEqual(validateMongoQueries(source, []), []);
+	});
+
+	test('resolves mapped Mongo document fields by repository import and @Field name', () => {
+		const first = parseEntityModelAst(
+			'package first; @Document class UserDocument { String firstEmail; }',
+			vscode.Uri.parse('file:///first/UserDocument.java'),
+		)!;
+		const second = parseEntityModelAst(
+			'package second; @Document class UserDocument { @Field(name = "email_address") String email; }',
+			vscode.Uri.parse('file:///second/UserDocument.java'),
+		)!;
+		const source = `package repos; import second.UserDocument; interface UserStore extends MongoRepository<UserDocument, String> { @Query("{ 'email_address': ?0 }") List<UserDocument> findUsers(String email); }`;
+		const fieldAccess = findMongoFieldAccesses(source, [first, second])[0];
+		assert.strictEqual(fieldAccess.entity.packageName, 'second');
+		assert.strictEqual(fieldAccess.property.name, 'email');
+	});
+
+	test('completes and validates MongoTemplate Criteria fields from the template operation type', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String email; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const source = [
+			'class UserService {',
+			'  MongoTemplate template;',
+			'  List<UserDocument> findUsers() {',
+			'    Query query = Query.query(Criteria.where("em"));',
+			'    return template.find(query, UserDocument.class);',
+			'  }',
+			'}',
+		].join('\n');
+		const document = {
+			getText: () => source,
+			offsetAt: (position: vscode.Position) => source.split(/\r?\n/).slice(0, position.line).join('\n').length + (position.line > 0 ? 1 : 0) + position.character,
+			positionAt: (offset: number) => new vscode.Position(3, offset - source.split(/\r?\n/).slice(0, 3).join('\n').length - 1),
+		} as vscode.TextDocument;
+		const cursor = source.indexOf('"em"') + 3;
+		const completion = createMongoTemplateCompletions(document, document.positionAt(cursor), [entity]);
+		assert.ok(completion?.some((item) => item.label === 'email'));
+
+		const invalidSource = source.replace('"em"', '"emial"');
+		const diagnostics = validateMongoTemplateQueries(invalidSource, [entity]);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.match(diagnostics[0].message, /Unknown MongoDB document field 'emial'.*email/);
+		assert.strictEqual(invalidSource.slice(diagnostics[0].startOffset, diagnostics[0].endOffset), 'emial');
+	});
+
 	test('completes and validates document fields in Mongo aggregation pipelines', () => {
 		const entity = parseEntityModelAst(
 			'@Document class UserDocument { String email; }',
@@ -202,6 +438,25 @@ suite('Extension Test Suite', () => {
 		const cursor = completionSource.indexOf("'em'") + 3;
 		const completions = createMongoQueryCompletions(document, new vscode.Position(0, cursor), [entity]);
 		assert.ok(completions?.some((item) => item.label === 'email'));
+	});
+
+	test('completes aggregation stages with Mongo documentation', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String email; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Aggregation(pipeline = {"{ '$ma': { 'email': ?0 } }"}) List<UserDocument> search(String email); }`;
+		const document = {
+			getText: () => source,
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as vscode.TextDocument;
+		const cursor = source.indexOf('$ma') + '$ma'.length;
+		const completions = createMongoQueryCompletions(document, new vscode.Position(0, cursor), [entity]);
+		const matchStage = completions?.find((item) => item.label === '$match');
+		assert.ok(matchStage);
+		assert.match(matchStage.detail ?? '', /MongoDB Aggregation operator/);
+		assert.ok(matchStage.documentation);
 	});
 
 	test('completes nested Mongo document paths in dotted query keys', () => {

@@ -214,7 +214,7 @@ function createProperty(
 	const fetchType = annotations.map((a) => a.text.match(/\bfetch\s*=\s*FetchType\.(EAGER|LAZY)\b/)?.[1] as 'EAGER' | 'LAZY' | undefined).find(Boolean);
 	const columnName = annotationValue(annotations, 'Column', 'name') ?? annotationValue(annotations, 'JoinColumn', 'name');
 	const fieldAnnotation = annotations.find((annotation) => annotation.name === 'Field')?.text;
-	const mongoFieldName = fieldAnnotation?.match(/\(\s*(?:value\s*=\s*)?"([^"]+)"/)?.[1];
+	const mongoFieldName = fieldAnnotation?.match(/\(\s*(?:(?:value|name)\s*=\s*)?"([^"]+)"/)?.[1];
 	return {
 		name,
 		type,

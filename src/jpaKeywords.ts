@@ -275,7 +275,11 @@ function capitalize(value: string): string {
 
 export function isRepositoryMethodContext(sourcePrefix: string): boolean {
 	const maskedPrefix = maskJavaSource(sourcePrefix);
-	const declarations = [...maskedPrefix.matchAll(/\b(?:interface|class)\s+\w*Repository\b[^{}]*\{/g)];
+	const repositoryTypes = '(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)';
+	const declarations = [...maskedPrefix.matchAll(new RegExp(
+		`\\b(?:interface|class)\\s+(?:\\w*Repository\\b[^{}]*|[\\w$]+\\s*(?:<[^{}]*>\\s*)?(?:extends|implements)\\s+[^{}]*\\b${repositoryTypes}\\s*<[^{}]*>[^{}]*)\\{`,
+		'g',
+	))];
 	const declaration = declarations.at(-1);
 	if (!declaration) {
 		return false;
@@ -300,7 +304,10 @@ export function isRepositoryMethodContext(sourcePrefix: string): boolean {
 }
 
 export function isRepositoryDeclarationHeader(sourcePrefix: string): boolean {
-	return /\b(?:interface|class)\s+\w*Repository\b[^{}]*$/.test(maskJavaSource(sourcePrefix));
+	const maskedPrefix = maskJavaSource(sourcePrefix);
+	const repositoryTypes = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</;
+	const declaration = maskedPrefix.match(/\b(?:interface|class)\s+[\w$]+(?:\s*<[^{}]*>)?[^{}]*$/);
+	return Boolean(declaration && (/\b\w*Repository\b/.test(declaration[0]) || repositoryTypes.test(declaration[0])));
 }
 
 export function isJpaPrefix(value: string): boolean {

@@ -15,6 +15,17 @@
     },
     {
       "name": "meta.embedded.mongo",
+      "begin": "(@Aggregation\\s*\\(\\s*)(\"\"\"|\")(?=\\s*\\{)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
+      "patterns": [{ "include": "#mongo" }]
+    },
+    {
+      "name": "meta.embedded.mongo",
       "begin": "(@Query\\s*\\(\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")(?=\\s*\\{)",
       "beginCaptures": {
         "1": { "name": "entity.name.function.annotation.java" },

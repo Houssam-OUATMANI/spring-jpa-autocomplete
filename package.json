@@ -3,7 +3,7 @@
 	"displayName": "Spring Data JPA & MongoDB Tools",
 	"publisher": "houssam-ouatmani",
 	"description": "Spring Data JPA and MongoDB autocomplete, query validation, navigation, and diagnostics for Java repositories.",
-	"version": "1.1.0",
+	"version": "2.0.0-eap",
 	"icon": "thumbnail.png",
 	"galleryBanner": {
 		"color": "#0b1f3a",
