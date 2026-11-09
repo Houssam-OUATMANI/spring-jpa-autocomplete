@@ -11,76 +11,26 @@ export interface JavaParameterPart {
 	readonly startOffset: number;
 }
 
+const JAVA_MASK_REGEX = /\/\*[\s\S]*?\*\/|\/\/[^\r\n]*|"""[\s\S]*?"""|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g;
+
+let lastMaskedInput: string | undefined;
+let lastMaskedOutput: string | undefined;
+
 export function maskJavaSource(text: string): string {
-	const chars = text.split('');
-	let mode: 'lineComment' | 'blockComment' | 'string' | 'char' | 'textBlock' | undefined;
-
-	for (let index = 0; index < text.length; index++) {
-		const next = text[index + 1];
-		if (!mode) {
-			if (text[index] === '/' && next === '/') {
-				chars[index] = ' ';
-				chars[index + 1] = ' ';
-				index++;
-				mode = 'lineComment';
-			} else if (text[index] === '/' && next === '*') {
-				chars[index] = ' ';
-				chars[index + 1] = ' ';
-				index++;
-				mode = 'blockComment';
-			} else if (text.startsWith('"""', index)) {
-				chars[index] = chars[index + 1] = chars[index + 2] = ' ';
-				index += 2;
-				mode = 'textBlock';
-			} else if (text[index] === '"') {
-				chars[index] = ' ';
-				mode = 'string';
-			} else if (text[index] === "'") {
-				chars[index] = ' ';
-				mode = 'char';
-			}
-			continue;
-		}
-
-		if (mode === 'lineComment') {
-			if (text[index] !== '\r' && text[index] !== '\n') {
-				chars[index] = ' ';
-			} else {
-				mode = undefined;
-			}
-		} else if (mode === 'blockComment') {
-			if (text[index] === '*' && next === '/') {
-				chars[index] = chars[index + 1] = ' ';
-				index++;
-				mode = undefined;
-			} else if (text[index] !== '\r' && text[index] !== '\n') {
-				chars[index] = ' ';
-			}
-		} else if (mode === 'textBlock') {
-			if (text.startsWith('"""', index)) {
-				chars[index] = chars[index + 1] = chars[index + 2] = ' ';
-				index += 2;
-				mode = undefined;
-			} else if (text[index] !== '\r' && text[index] !== '\n') {
-				chars[index] = ' ';
-			}
-		} else if (mode === 'string' || mode === 'char') {
-			if (text[index] === '\\') {
-				chars[index] = ' ';
-				if (index + 1 < text.length) {
-					chars[index + 1] = ' ';
-					index++;
-				}
-			} else if ((mode === 'string' && text[index] === '"') || (mode === 'char' && text[index] === "'")) {
-				chars[index] = ' ';
-				mode = undefined;
-			} else if (text[index] !== '\r' && text[index] !== '\n') {
-				chars[index] = ' ';
-			}
-		}
+	if (lastMaskedInput === text) {
+		return lastMaskedOutput!;
 	}
-
-	return chars.join('');
+	const result = text.replace(JAVA_MASK_REGEX, (match) => {
+		let spaces = '';
+		for (let i = 0; i < match.length; i++) {
+			const c = match.charCodeAt(i);
+			spaces += (c === 10 || c === 13) ? match[i] : ' ';
+		}
+		return spaces;
+	});
+	lastMaskedInput = text;
+	lastMaskedOutput = result;
+	return result;
 }
 
 export function splitTopLevelParameters(paramsText: string, baseOffset = 0): JavaParameterPart[] {

@@ -288,7 +288,7 @@ export class WorkspaceEntityIndex {
 		}, debounceMs);
 	}
 
-	public updateDocument(document: vscode.TextDocument): EntityInfo | undefined {
+	public updateDocument(document: vscode.TextDocument, persist = false): EntityInfo | undefined {
 		if (document.languageId !== 'java' || isExcludedJavaUri(document.uri, this.includeTestSources())) {
 			this.lastUpdateStructuralChange = false;
 			return undefined;
@@ -326,7 +326,9 @@ export class WorkspaceEntityIndex {
 		if (previousEntities || entities.length > 0) {
 			this.rebuildNameIndex();
 		}
-		this.schedulePersistCache();
+		if (persist) {
+			this.schedulePersistCache();
+		}
 		return entities[0];
 	}
 
@@ -451,78 +453,82 @@ export class WorkspaceEntityIndex {
 			}
 
 			let lastYield = Date.now();
-			for (const uri of files) {
-				try {
-					if (isExcludedJavaUri(uri, includeTestSources)) {
-						continue;
-					}
-					const uriKey = uri.toString();
-					const cached = cachedFiles?.[uriKey];
-
-					// FAST PATH: Check file stat (mtime + size) without reading file content from disk
-					let stat: { mtime: number; size: number } | undefined;
+			const BATCH_SIZE = 32;
+			for (let i = 0; i < files.length; i += BATCH_SIZE) {
+				const batch = files.slice(i, i + BATCH_SIZE);
+				await Promise.all(batch.map(async (uri) => {
 					try {
-						if (vscode.workspace.fs?.stat) {
-							const fileStat = await vscode.workspace.fs.stat(uri);
-							stat = { mtime: fileStat.mtime, size: fileStat.size };
+						if (isExcludedJavaUri(uri, includeTestSources)) {
+							return;
+						}
+						const uriKey = uri.toString();
+						const cached = cachedFiles?.[uriKey];
+
+						// FAST PATH: Check file stat (mtime + size) without reading file content from disk
+						let stat: { mtime: number; size: number } | undefined;
+						try {
+							if (vscode.workspace.fs?.stat) {
+								const fileStat = await vscode.workspace.fs.stat(uri);
+								stat = { mtime: fileStat.mtime, size: fileStat.size };
+							}
+						} catch {
+							stat = undefined;
+						}
+
+						if (cached && stat && cached.mtime !== undefined && cached.size !== undefined
+							&& cached.mtime === stat.mtime && cached.size === stat.size) {
+							this.sourceFingerprints.set(uriKey, cached.fingerprint);
+							this.fileStats.set(uriKey, stat);
+							if (cached.entities?.length > 0) {
+								this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
+							}
+							if (cached.projectionTypes?.length > 0) {
+								this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
+							}
+							if (cached.repositories?.length > 0) {
+								this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
+							}
+							return;
+						}
+
+						// SLOW PATH: Read file from disk
+						const contents = await vscode.workspace.fs.readFile(uri);
+						const text = Buffer.from(contents).toString('utf8');
+						const fingerprint = sourceFingerprint(text);
+
+						if (stat) {
+							this.fileStats.set(uriKey, stat);
+						}
+
+						if (cached && cached.fingerprint === fingerprint) {
+							this.sourceFingerprints.set(uriKey, fingerprint);
+							if (cached.entities?.length > 0) {
+								this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
+							}
+							if (cached.projectionTypes?.length > 0) {
+								this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
+							}
+							if (cached.repositories?.length > 0) {
+								this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
+							}
+							return;
+						}
+
+						this.sourceFingerprints.set(uriKey, fingerprint);
+						const projectionTypes: ProjectionTypeInfo[] = [];
+						const entities = parseEntityModels(text, uri, projectionTypes);
+						this.projectionTypesByUri.set(uriKey, projectionTypes);
+						if (entities.length > 0) {
+							this.entitiesByUri.set(uriKey, entities);
+						}
+						const repos = extractRepositoryInfos(text, uri);
+						if (repos.length > 0) {
+							this.repositoriesByUri.set(uriKey, repos);
 						}
 					} catch {
-						stat = undefined;
+						// ignore
 					}
-
-					if (cached && stat && cached.mtime !== undefined && cached.size !== undefined
-						&& cached.mtime === stat.mtime && cached.size === stat.size) {
-						this.sourceFingerprints.set(uriKey, cached.fingerprint);
-						this.fileStats.set(uriKey, stat);
-						if (cached.entities?.length > 0) {
-							this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
-						}
-						if (cached.projectionTypes?.length > 0) {
-							this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
-						}
-						if (cached.repositories?.length > 0) {
-							this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
-						}
-						continue;
-					}
-
-					// SLOW PATH: Read file from disk
-					const contents = await vscode.workspace.fs.readFile(uri);
-					const text = Buffer.from(contents).toString('utf8');
-					const fingerprint = sourceFingerprint(text);
-
-					if (stat) {
-						this.fileStats.set(uriKey, stat);
-					}
-
-					if (cached && cached.fingerprint === fingerprint) {
-						this.sourceFingerprints.set(uriKey, fingerprint);
-						if (cached.entities?.length > 0) {
-							this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
-						}
-						if (cached.projectionTypes?.length > 0) {
-							this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
-						}
-						if (cached.repositories?.length > 0) {
-							this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
-						}
-						continue;
-					}
-
-					this.sourceFingerprints.set(uriKey, fingerprint);
-					const projectionTypes: ProjectionTypeInfo[] = [];
-					const entities = parseEntityModels(text, uri, projectionTypes);
-					this.projectionTypesByUri.set(uriKey, projectionTypes);
-					if (entities.length > 0) {
-						this.entitiesByUri.set(uriKey, entities);
-					}
-					const repos = extractRepositoryInfos(text, uri);
-					if (repos.length > 0) {
-						this.repositoriesByUri.set(uriKey, repos);
-					}
-				} catch {
-					// ignore
-				}
+				}));
 				if (Date.now() - lastYield >= 15) {
 					await new Promise<void>((resolve) => setTimeout(resolve, 0));
 					lastYield = Date.now();
@@ -560,7 +566,12 @@ export function extractRepositoryEntityNames(text: string): string[] {
 	return [...text.matchAll(REPOSITORY_ENTITY)].map((match) => match[1]);
 }
 
+const REPO_FILE_PATTERN = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\b|@(Query|NativeQuery|Aggregation)\b/;
+
 export function extractRepositoryInfos(text: string, uri: vscode.Uri): RepositoryInfo[] {
+	if (!REPO_FILE_PATTERN.test(text)) {
+		return [];
+	}
 	const repos: RepositoryInfo[] = [];
 	const masked = maskJavaSource(text);
 	const repoRegex = /\binterface\s+([A-Za-z_$]\w*)\s*(?:<[^>]*>)?\s*extends\s+([^{]+)\{/g;
@@ -591,13 +602,23 @@ export function extractRepositoryInfos(text: string, uri: vscode.Uri): Repositor
 	return repos;
 }
 
+let lastRepoText: string | undefined;
+let lastRepoMatches: { offset: number; entityName: string }[] = [];
+
 export function extractRepositoryEntityNameAt(text: string, offset: number): string | undefined {
+	if (lastRepoText !== text) {
+		lastRepoText = text;
+		lastRepoMatches = [];
+		for (const match of text.matchAll(REPOSITORY_ENTITY)) {
+			lastRepoMatches.push({ offset: match.index ?? 0, entityName: match[1] });
+		}
+	}
 	let selected: string | undefined;
-	for (const match of text.matchAll(REPOSITORY_ENTITY)) {
-		if ((match.index ?? 0) > offset) {
+	for (const match of lastRepoMatches) {
+		if (match.offset > offset) {
 			break;
 		}
-		selected = match[1];
+		selected = match.entityName;
 	}
 	return selected;
 }
@@ -750,8 +771,9 @@ function addEntityProperties(
 	ancestors: ReadonlySet<string>,
 	properties: Map<string, EntityProperty>,
 	entitiesByName: ReadonlyMap<string, EntityInfo>,
+	depth = 0,
 ): void {
-	if (ancestors.has(entity.name)) {
+	if (ancestors.has(entity.name) || depth > 2) {
 		return;
 	}
 
@@ -790,7 +812,7 @@ function addEntityProperties(
 			const referencedEntity = findEntityByName(entitiesByName, referencedEntityName);
 			if (referencedEntity) {
 				const resolvedReferenced = resolveEntityHierarchy(referencedEntity, entitiesByName);
-				addEntityProperties(resolvedReferenced, camelName, nextAncestors, properties, entitiesByName);
+				addEntityProperties(resolvedReferenced, camelName, nextAncestors, properties, entitiesByName, depth + 1);
 			}
 		}
 	}

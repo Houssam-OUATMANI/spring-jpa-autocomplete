@@ -12,7 +12,7 @@ export function createJpqlCompletions(
 	position: vscode.Position,
 	entities: readonly EntityInfo[],
 	sqlDialect: SqlDialect = 'generic',
-	projectionTypes: readonly ProjectionTypeInfo[] = entities.map((entity) => ({
+	projectionTypes: readonly ProjectionTypeInfo[] | (() => readonly ProjectionTypeInfo[]) = () => entities.map((entity) => ({
 		name: entity.name,
 		packageName: entity.packageName,
 		kind: 'class',
@@ -50,11 +50,12 @@ export function createJpqlCompletions(
 	const items: vscode.CompletionItem[] = [];
 	const dtoMatch = queryPrefix.match(/\bNEW\s+([\w$.]*)$/i);
 	if (dtoMatch) {
+		const resolvedProjectionTypes = typeof projectionTypes === 'function' ? projectionTypes() : projectionTypes;
 		const typedType = dtoMatch[1];
 		const partial = typedType.split('.').pop() ?? '';
 		const startPos = new vscode.Position(position.line, position.character - typedType.length);
 		const replaceRange = new vscode.Range(startPos, position);
-		const dtoItems = projectionTypes
+		const dtoItems = resolvedProjectionTypes
 			.filter((type) => {
 				const qualifiedName = type.packageName ? `${type.packageName}.${type.name}` : type.name;
 				return typedType.includes('.')

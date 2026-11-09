@@ -274,6 +274,12 @@ function capitalize(value: string): string {
 }
 
 export function isRepositoryMethodContext(sourcePrefix: string): boolean {
+	const linePrefix = sourcePrefix.slice(Math.max(sourcePrefix.lastIndexOf('\n'), sourcePrefix.lastIndexOf('\r')) + 1);
+	const partialWord = linePrefix.match(/[A-Za-z]*$/)?.[0] ?? '';
+	if (!isJpaPrefix(partialWord) && !/\b(?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By\w*$/.test(linePrefix)) {
+		return false;
+	}
+
 	const maskedPrefix = maskJavaSource(sourcePrefix);
 	const repositoryTypes = '(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)';
 	const declarations = [...maskedPrefix.matchAll(new RegExp(
@@ -293,18 +299,16 @@ export function isRepositoryMethodContext(sourcePrefix: string): boolean {
 			bodyDepth--;
 		}
 	}
-	if (bodyDepth !== 1) {
-		return false;
-	}
-
-	const linePrefix = sourcePrefix.slice(Math.max(sourcePrefix.lastIndexOf('\n'), sourcePrefix.lastIndexOf('\r')) + 1);
-	const partialWord = linePrefix.match(/[A-Za-z]*$/)?.[0] ?? '';
-	return isJpaPrefix(partialWord) ||
-		/\b(?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By\w*$/.test(linePrefix);
+	return bodyDepth === 1;
 }
 
 export function isRepositoryDeclarationHeader(sourcePrefix: string): boolean {
-	const maskedPrefix = maskJavaSource(sourcePrefix);
+	const lastDelim = Math.max(sourcePrefix.lastIndexOf(';'), sourcePrefix.lastIndexOf('{'), sourcePrefix.lastIndexOf('}'));
+	const candidate = lastDelim >= 0 ? sourcePrefix.slice(lastDelim + 1) : sourcePrefix;
+	if (!/\b(?:interface|class)\b/.test(candidate)) {
+		return false;
+	}
+	const maskedPrefix = maskJavaSource(candidate);
 	const repositoryTypes = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</;
 	const declaration = maskedPrefix.match(/\b(?:interface|class)\s+[\w$]+(?:\s*<[^{}]*>)?[^{}]*$/);
 	return Boolean(declaration && (/\b\w*Repository\b/.test(declaration[0]) || repositoryTypes.test(declaration[0])));

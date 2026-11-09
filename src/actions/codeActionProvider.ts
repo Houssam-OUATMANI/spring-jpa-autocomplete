@@ -284,14 +284,17 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 					: 0) + (methodMatch.index ?? 0);
 				const repoEntityName = extractRepositoryEntityNameAt(docText, offset);
 				const isMongoRepository = isMongoRepositoryAt(docText, offset);
-				const maskedBeforeMethod = maskJavaSource(docText.slice(0, methodStartOffset));
-				const declarationStart = Math.max(
-					maskedBeforeMethod.lastIndexOf(';'),
-					maskedBeforeMethod.lastIndexOf('{'),
-					maskedBeforeMethod.lastIndexOf('}'),
-				) + 1;
+				const lookbackStart = Math.max(0, methodStartOffset - 1000);
+				const prefixSnippet = docText.slice(lookbackStart, methodStartOffset);
+				const maskedPrefix = maskJavaSource(prefixSnippet);
+				const lastDelim = Math.max(
+					maskedPrefix.lastIndexOf(';'),
+					maskedPrefix.lastIndexOf('{'),
+					maskedPrefix.lastIndexOf('}'),
+				);
+				const declarationStart = lastDelim >= 0 ? lastDelim + 1 : 0;
 				const hasExistingQueryAnnotation = /@(?:Query|Aggregation)\b/.test(
-					maskJavaSource(docText.slice(declarationStart, methodStartOffset)),
+					maskedPrefix.slice(declarationStart),
 				);
 				if (repoEntityName && !hasExistingQueryAnnotation) {
 					const signature = {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createEntityLookup, extractRepositoryEntityNames, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, WorkspaceEntityIndex } from '../entityDiscovery';
 
 export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 	public async provideCodeLenses(document: vscode.TextDocument, _token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
@@ -43,35 +43,16 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 
 			// Find repositories in index or open workspace documents that manage this entity
 			const indexedRepos = index.getRepositoriesForEntity(entity.name);
-			const seenUris = new Set<string>();
 
 			for (const repo of indexedRepos) {
 				if (repo.uri.toString() === document.uri.toString()) {
 					continue;
 				}
-				seenUris.add(repo.uri.toString());
 				lenses.push(new vscode.CodeLens(entityRange, {
 					command: 'springJpa.openRepository',
 					title: `Spring Data: ${repo.name}`,
 					arguments: [repo.uri],
 				}));
-			}
-
-			for (const otherDoc of vscode.workspace.textDocuments) {
-				if (otherDoc.uri.toString() === document.uri.toString() || otherDoc.languageId !== 'java' || seenUris.has(otherDoc.uri.toString())) {
-					continue;
-				}
-				const otherText = otherDoc.getText();
-				const managedEntities = extractRepositoryEntityNames(otherText);
-				if (managedEntities.some((name) => name.toLowerCase() === entity.name.toLowerCase())) {
-					const repoNameMatch = otherText.match(/\binterface\s+([A-Z]\w*Repository)\b/);
-					const repoTitle = repoNameMatch ? repoNameMatch[1] : 'Spring Data Repository';
-					lenses.push(new vscode.CodeLens(entityRange, {
-						command: 'springJpa.openRepository',
-						title: `Spring Data: ${repoTitle}`,
-						arguments: [otherDoc.uri],
-					}));
-				}
 			}
 		}
 
