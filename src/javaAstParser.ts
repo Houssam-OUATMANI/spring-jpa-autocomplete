@@ -115,12 +115,13 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri'], proje
 		}
 
 		const hasExplicitEntity = annotations.has('Entity');
+		const isMongoDocument = annotations.has('Document');
 		const isMappedSuperclass = annotations.has('MappedSuperclass');
 		const isEmbeddable = annotations.has('Embeddable');
 		const isProjection = Boolean(normalInterface && properties.size > 0);
 		const hasJpaMarkers = annotations.has('Table') || [...properties.values()].some((p) => p.isId || p.relation !== undefined || p.columnName !== undefined);
-		const isEntity = hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !record && !isProjection && hasJpaMarkers);
-		if (!isEntity && !isMappedSuperclass && !isEmbeddable && !record && !isProjection) {
+		const isEntity = !isMongoDocument && (hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !record && !isProjection && hasJpaMarkers));
+		if (!isEntity && !isMappedSuperclass && !isEmbeddable && !record && !isProjection && !isMongoDocument) {
 			continue;
 		}
 
@@ -134,6 +135,7 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri'], proje
 			packageName,
 			uri,
 			...(isEntity ? { isEntity: true, hasEntityAnnotation: hasExplicitEntity } : {}),
+			...(isMongoDocument ? { isMongoDocument: true } : {}),
 			...(isFinal ? { isFinal: true } : {}),
 			isProjection: isProjection || undefined,
 			superclassName,
@@ -211,6 +213,8 @@ function createProperty(
 		?? annotationValue(annotations, 'ManyToMany', 'mappedBy');
 	const fetchType = annotations.map((a) => a.text.match(/\bfetch\s*=\s*FetchType\.(EAGER|LAZY)\b/)?.[1] as 'EAGER' | 'LAZY' | undefined).find(Boolean);
 	const columnName = annotationValue(annotations, 'Column', 'name') ?? annotationValue(annotations, 'JoinColumn', 'name');
+	const fieldAnnotation = annotations.find((annotation) => annotation.name === 'Field')?.text;
+	const mongoFieldName = fieldAnnotation?.match(/\(\s*(?:value\s*=\s*)?"([^"]+)"/)?.[1];
 	return {
 		name,
 		type,
@@ -220,6 +224,7 @@ function createProperty(
 		mappedBy,
 		fetchType,
 		columnName,
+		mongoFieldName,
 		isCollection: /\b(?:Collection|List|Set|Iterable|Map)\s*</.test(type) || /\[\]/.test(type),
 		location: location(text, nameToken.startOffset, nameToken.endOffset - nameToken.startOffset + 1),
 	};

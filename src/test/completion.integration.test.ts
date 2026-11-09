@@ -89,4 +89,56 @@ suite('Completion Integration Tests', () => {
 			await vscode.workspace.fs.delete(fixtureUri, { recursive: true, useTrash: false });
 		}
 	});
+
+	test('completes Mongo document properties and reports unknown @Query fields', async function () {
+		this.timeout(15_000);
+		const extension = vscode.extensions.getExtension('houssam-ouatmani.spring-jpa-autocomplete');
+		assert.ok(extension);
+		await extension.activate();
+
+		const fixtureUri = vscode.Uri.file(path.join(os.tmpdir(), `spring-mongo-vscode-integration-${process.pid}-${Date.now()}`));
+		const documentUri = vscode.Uri.joinPath(fixtureUri, 'UserDocument.java');
+		const repositoryUri = vscode.Uri.joinPath(fixtureUri, 'UserMongoRepository.java');
+		const repositorySource = [
+			'interface UserMongoRepository extends MongoRepository<UserDocument, String> {',
+			'    List<UserDocument> findByDis',
+			`    @Query("{ 'emial': ?0 }") List<UserDocument> findByEmailQuery(String email);`,
+			'}',
+		].join('\n');
+
+		try {
+			await vscode.workspace.fs.createDirectory(fixtureUri);
+			await vscode.workspace.fs.writeFile(
+				documentUri,
+				Buffer.from('@Document class UserDocument { @Id String id; @Field("display_name") String displayName; String email; }'),
+			);
+			await vscode.workspace.fs.writeFile(repositoryUri, Buffer.from(repositorySource));
+			await vscode.workspace.openTextDocument(documentUri);
+			const repository = await vscode.workspace.openTextDocument(repositoryUri);
+
+			const completionPosition = new vscode.Position(1, repositorySource.split('\n')[1].length);
+			const completions = await vscode.commands.executeCommand<vscode.CompletionList>(
+				'vscode.executeCompletionItemProvider',
+				repository.uri,
+				completionPosition,
+			);
+			assert.ok(completions?.items.some((item) => item.label === 'DisplayName'));
+
+			const deadline = Date.now() + 5_000;
+			let mongoDiagnostic: vscode.Diagnostic | undefined;
+			while (Date.now() < deadline) {
+				mongoDiagnostic = vscode.languages.getDiagnostics(repositoryUri).find(
+					(diagnostic) => diagnostic.source === 'spring-jpa' && diagnostic.code === 'UNKNOWN_MONGO_FIELD',
+				);
+				if (mongoDiagnostic) {
+					break;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			assert.ok(mongoDiagnostic, 'Expected an unknown Mongo query field diagnostic.');
+			assert.match(mongoDiagnostic.message, /Unknown MongoDB document field 'emial'/);
+		} finally {
+			await vscode.workspace.fs.delete(fixtureUri, { recursive: true, useTrash: false });
+		}
+	});
 });

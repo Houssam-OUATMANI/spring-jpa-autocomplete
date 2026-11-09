@@ -19,6 +19,7 @@ export function createJpqlCompletions(
 		uri: entity.uri,
 	})),
 ): vscode.CompletionItem[] | undefined {
+	entities = entities.filter((entity) => !entity.isMongoDocument);
 	const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
 
 	// Quick check: are we inside a @Query string?

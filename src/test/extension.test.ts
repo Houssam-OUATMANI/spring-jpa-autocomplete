@@ -26,6 +26,7 @@ import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
 import { SpringJpaReferenceProvider } from '../navigation/referenceProvider';
 import { SpringJpaRenameProvider } from '../navigation/renameProvider';
 import { createEntityGraphCompletions, validateEntityGraphs } from '../entityGraph/entityGraphSupport';
+import { createMongoQueryCompletions, findMongoFieldAccesses, isMongoRepositoryAt, validateMongoQueries } from '../mongoSupport';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -123,6 +124,104 @@ suite('Extension Test Suite', () => {
 			}
 		`;
 		assert.deepStrictEqual(parseEntityModels(code, uri), []);
+	});
+
+	test('indexes Mongo documents without classifying them as JPA entities', () => {
+		const document = parseEntityModelAst(`
+			package com.example;
+			@Document(collection = "users")
+			class UserDocument {
+				@Id private String id;
+				@Field("display_name") private String displayName;
+				@Transient private String cachedValue;
+			}
+		`, vscode.Uri.parse('file:///UserDocument.java'));
+		assert.ok(document);
+		assert.strictEqual(document.isMongoDocument, true);
+		assert.strictEqual(document.isEntity, undefined);
+		assert.deepStrictEqual(document.properties.map((property) => property.name), ['displayName', 'id']);
+		assert.strictEqual(document.properties.find((property) => property.name === 'displayName')?.mongoFieldName, 'display_name');
+	});
+
+	test('recognizes Mongo repository scopes without matching nearby JPA repositories', () => {
+		const source = [
+			'interface UserMongoRepository extends MongoRepository<UserDocument, String> {',
+			'    @Query("{email: ?0}") List<UserDocument> findByEmail(String email);',
+			'}',
+			'interface UserJpaRepository extends JpaRepository<User, Long> {',
+			'    @Query("select u from User u") List<User> findUsers();',
+			'}',
+		].join('\n');
+		assert.strictEqual(isMongoRepositoryAt(source, source.indexOf('email:')), true);
+		assert.strictEqual(isMongoRepositoryAt(source, source.indexOf('select u')), false);
+		assert.deepStrictEqual(extractRepositoryEntityNames(source), ['UserDocument', 'User']);
+	});
+
+	test('completes mapped Mongo fields inside @Query and diagnoses misspelled document keys', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String email; @Field("display_name") String displayName; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'dis' : ?0 }") List<UserDocument> findByEmail(String email); }`;
+		const document = {
+			getText: () => source,
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as vscode.TextDocument;
+		const cursor = source.indexOf("'dis") + 4;
+		const completions = createMongoQueryCompletions(document, new vscode.Position(0, cursor), [entity]);
+		assert.ok(completions?.some((item) => item.label === 'display_name'));
+		const diagnostics = validateMongoQueries(
+			source.replace("'dis'", "'emial'"),
+			[entity],
+		);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.match(diagnostics[0].message, /Unknown MongoDB document field 'emial'.*email/);
+		const mappedFieldSource = source.replace("'dis'", "'display_name'");
+		const fieldAccess = findMongoFieldAccesses(mappedFieldSource, [entity])[0];
+		assert.strictEqual(fieldAccess.property.name, 'displayName');
+		assert.strictEqual(fieldAccess.entity.name, 'UserDocument');
+	});
+
+	test('completes and validates document fields in Mongo aggregation pipelines', () => {
+		const entity = parseEntityModelAst(
+			'@Document class UserDocument { String email; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Aggregation(pipeline = {"{ '$match': { 'emial': ?0 } }"}) List<UserDocument> findUsers(String email); }`;
+		const diagnostics = validateMongoQueries(source, [entity]);
+		assert.strictEqual(diagnostics.length, 1);
+		assert.match(diagnostics[0].message, /Unknown MongoDB document field 'emial'.*email/);
+
+		const completionSource = source.replace("'emial'", "'em'");
+		const document = {
+			getText: () => completionSource,
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as vscode.TextDocument;
+		const cursor = completionSource.indexOf("'em'") + 3;
+		const completions = createMongoQueryCompletions(document, new vscode.Position(0, cursor), [entity]);
+		assert.ok(completions?.some((item) => item.label === 'email'));
+	});
+
+	test('completes nested Mongo document paths in dotted query keys', () => {
+		const user = parseEntityModelAst(
+			'@Document class UserDocument { Address address; }',
+			vscode.Uri.parse('file:///UserDocument.java'),
+		)!;
+		const address = parseEntityModelAst(
+			'@Document class Address { String city; }',
+			vscode.Uri.parse('file:///Address.java'),
+		)!;
+		const source = `interface UserMongoRepository extends MongoRepository<UserDocument, String> { @Query("{ 'address.ci' : ?0 }") List<UserDocument> findByAddressCity(String city); }`;
+		const document = {
+			getText: () => source,
+			offsetAt: (position: vscode.Position) => position.character,
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as vscode.TextDocument;
+		const cursor = source.indexOf("'address.ci'") + "'address.ci".length;
+		const completions = createMongoQueryCompletions(document, new vscode.Position(0, cursor), [user, address]);
+		assert.ok(completions?.some((item) => item.label === 'address.city'));
 	});
 
 	test('skips repository interfaces from being treated as projections', () => {
@@ -1036,6 +1135,18 @@ suite('Extension Test Suite', () => {
 		const items = createDerivedQueryCompletions('List<User> findByE', [{ name: 'email', type: 'String' }], new vscode.Position(0, 19));
 		assert.ok(items.length > 0);
 		assert.strictEqual(items[0].sortText, '0_Email');
+	});
+
+	test('offers Mongo-derived query operators with Mongo-specific details', () => {
+		const items = createDerivedQueryCompletions(
+			'List<UserDocument> findByEmailL',
+			[{ name: 'email', type: 'String' }],
+			new vscode.Position(0, 31),
+			'mongo',
+		);
+		assert.ok(items.some((item) => item.label === 'LessThan'));
+		assert.ok(items.some((item) => item.label === 'Like'));
+		assert.ok(items.some((item) => item.detail?.includes('Spring Data MongoDB')));
 	});
 
 	// ==========================================

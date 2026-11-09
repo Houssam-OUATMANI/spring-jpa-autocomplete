@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
+import { findMongoFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
 
 export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 	public async provideReferences(
@@ -46,9 +47,22 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 			}
 			const text = doc.getText();
 
+			for (const access of findMongoFieldAccesses(text, allEntities)) {
+				if (access.entity.uri.toString() === entity.uri.toString()
+					&& access.property.name.toLowerCase() === property.name.toLowerCase()) {
+					references.push(new vscode.Location(
+						doc.uri,
+						new vscode.Range(doc.positionAt(access.startOffset), doc.positionAt(access.endOffset)),
+					));
+				}
+			}
+
 			// Check JPQL queries
 			const jpqlQueries = extractAllJpqlQueries(text, allEntities);
 			for (const query of jpqlQueries) {
+				if (isMongoRepositoryAt(text, query.queryStartOffset)) {
+					continue;
+				}
 				for (const access of query.propertyAccesses) {
 					const targetEntity = query.aliases.get(access.alias);
 					if (targetEntity && targetEntity.toLowerCase() === entity.name.toLowerCase()) {
@@ -62,7 +76,7 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 			}
 
 			// Check derived query repository methods
-			const isRepo = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/.test(text);
+			const isRepo = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*([A-Z]\w*)/.test(text);
 			if (isRepo) {
 				const methodRegex = /\b(?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By[A-Za-z0-9_]+/g;
 				let match: RegExpExecArray | null;

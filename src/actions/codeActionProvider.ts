@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { extractRepositoryEntityNameAt, getIndexedEntities, WorkspaceEntityIndex } from '../entityDiscovery';
 import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
 import { parseJavaParameters } from '../javaParsing';
+import { isMongoRepositoryAt } from '../mongoSupport';
 
 interface SpringJpaDiagnostic extends vscode.Diagnostic {
 	missingParam?: { name: string; type: string };
@@ -208,7 +209,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						actions.push(fixAll);
 					}
 				}
-			} else if (code === 'UNKNOWN_PROPERTY') {
+			} else if (code === 'UNKNOWN_PROPERTY' || code === 'UNKNOWN_MONGO_FIELD') {
 				const suggestedProperty = springDiagnostic.suggestedProperty ?? diagnostic.message.match(/Did you mean '([^']+)'\?/)?.[1];
 				if (suggestedProperty) {
 					const action = new vscode.CodeAction(
@@ -276,7 +277,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 				const docText = document.getText();
 				const offset = typeof document.offsetAt === 'function' ? document.offsetAt(range.start) : 0;
 				const repoEntityName = extractRepositoryEntityNameAt(docText, offset);
-				if (repoEntityName) {
+				if (repoEntityName && !isMongoRepositoryAt(docText, offset)) {
 					const converted = convertDerivedQueryToJpql({
 						rawText: methodMatch[0],
 						returnType,

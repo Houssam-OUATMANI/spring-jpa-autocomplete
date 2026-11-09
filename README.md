@@ -1,4 +1,4 @@
-# Spring Data JPA Tools
+# Spring Data JPA & MongoDB Tools
 
 **Version 1.1.0**
 
@@ -6,7 +6,7 @@
 <br>
 [Install from Open VSX Registry](https://open-vsx.org/extension/houssam-ouatmani/spring-jpa-autocomplete)
 
-Write Spring Data JPA repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and entity models.
+Write Spring Data JPA and MongoDB repositories with context-aware completion, live query diagnostics, one-step fixes, and navigation between repository code and data models.
 
 ## See It in Action
 
@@ -80,6 +80,26 @@ List<User> searchByEmail(@Param("email") String email);
 
 Native query strings receive SQL syntax highlighting and mapped table / column suggestions from `@Table`, `@Column`, and `@JoinColumn`. `@NativeQuery` is supported as well. The extension also recognizes common SQL dialect keywords for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2, with auto-detection from Spring/Hibernate settings or JDBC URLs and an override at workspace or file level.
 
+### Work with Spring Data MongoDB
+
+```java
+@Document("users")
+class UserDocument {
+  @Id String id;
+  @Field("display_name") String displayName;
+  String email;
+}
+
+interface UserRepository extends MongoRepository<UserDocument, String> {
+  List<UserDocument> findByDisplayNameStartingWith(String prefix);
+
+  @Query("{ 'emial': ?0 }")
+  List<UserDocument> findByEmail(String email);
+}
+```
+
+Mongo document fields power derived-query completion. Mongo `@Query` and `@Aggregation` strings complete mapped document keys, honor `@Field` names, and report unknown keys. Mongo field diagnostics can be configured independently with `springJpa.diagnostics.mongoQueries`. This initial MongoDB support covers repositories and annotation-based query strings; `MongoTemplate` / Criteria completion is not included yet.
+
 ## Feature Reference
 
 - **Derived query completions**: `findBy`, `countBy`, `existsBy`, `deleteBy`, etc. with modifiers (`Distinct`, `Top`, `First`), predicates, operators, connectors, and `OrderBy`.
@@ -129,6 +149,8 @@ Native query strings receive SQL syntax highlighting and mapped table / column s
 - **Native SQL support**: recognizes Spring Data `@NativeQuery` and `@Query(nativeQuery = true)`, with SQL syntax highlighting and table / mapped-column suggestions based on `@Table`, `@Column`, and `@JoinColumn`.
   - SQL dialect awareness for PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, and H2.
   - Auto-detection from Spring/Hibernate settings and JDBC URLs, with a workspace-level override and a per-file override for active native queries.
+- **Spring Data MongoDB**: indexes `@Document` types separately from JPA entities, supports synchronous and reactive Mongo repositories, suggests derived-query operators and mapped fields in `@Query` / `@Aggregation`, and diagnoses unknown Mongo query keys.
+  - Supports mapped and dotted nested field paths, `F12`, references, rename edits for unmapped keys, and a typo Quick Fix.
 - **IDE Navigation & Refactoring (`F12`, `F2`, `Shift+F12`)**:
   - **Go to Definition (`F12`)**:
     - Click on derived query property segment $\to$ jumps directly to the field definition in the entity.

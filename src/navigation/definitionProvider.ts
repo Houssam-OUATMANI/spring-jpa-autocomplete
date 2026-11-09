@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
+import { findMongoFieldAt, isMongoRepositoryAt } from '../mongoSupport';
 
 export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 	public async provideDefinition(
@@ -23,7 +24,7 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		const word = document.getText(wordRange);
 
 		// 1. Navigation from Repository generic: JpaRepository<User, Long>
-		const genericMatch = lineText.match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository)\s*<\s*([A-Z]\w*)/);
+		const genericMatch = lineText.match(/\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository)\s*<\s*([A-Z]\w*)/);
 		if (genericMatch && genericMatch[1] === word) {
 			const targetEntity = entityMap.get(word.toLowerCase());
 			if (targetEntity) {
@@ -34,8 +35,15 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		// 2. Navigation inside @Query
 		const docText = document.getText();
 		const offset = document.offsetAt(position);
+		const mongoField = findMongoFieldAt(docText, offset, entities);
+		if (mongoField?.property.location) {
+			return new vscode.Location(
+				mongoField.entity.uri,
+				new vscode.Position(mongoField.property.location.line, mongoField.property.location.character),
+			);
+		}
 		const jpqlQueries = extractAllJpqlQueries(docText, entities);
-		const activeQuery = jpqlQueries.find(
+		const activeQuery = isMongoRepositoryAt(docText, offset) ? undefined : jpqlQueries.find(
 			(q) => offset >= q.queryStartOffset && offset <= q.queryEndOffset,
 		);
 
@@ -100,7 +108,7 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 				}
 
 				// Find which entity this repository manages
-				const repoEntityMatch = docText.match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository)\s*<\s*([A-Z]\w*)/);
+				const repoEntityMatch = docText.match(/\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository)\s*<\s*([A-Z]\w*)/);
 				const targetEntityName = repoEntityMatch ? repoEntityMatch[1] : undefined;
 				const targetEntity = targetEntityName ? entityMap.get(targetEntityName.toLowerCase()) : entities[0];
 

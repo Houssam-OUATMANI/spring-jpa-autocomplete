@@ -11,11 +11,19 @@ export interface MethodSuggestion {
 }
 
 const CONNECTORS = ['And', 'Or'];
+const MONGO_OPERATORS = new Set([
+	'IsStartingWith', 'IsEndingWith', 'IsContaining', 'StartingWith', 'EndingWith', 'Containing', 'Contains',
+	'LessThanEqual', 'GreaterThanEqual', 'LessThan', 'GreaterThan', 'Between', 'Before', 'After',
+	'Like', 'NotLike',
+	'IsNull', 'IsNotNull', 'NotNull', 'Null', 'IsTrue', 'IsFalse', 'True', 'False', 'NotIn', 'In',
+	'IsNot', 'Not', 'Equals', 'Is', 'IsEmpty', 'IsNotEmpty',
+]);
 
 export function createDerivedQueryCompletions(
 	linePrefix: string,
 	properties: readonly EntityProperty[],
 	position: vscode.Position,
+	backend: 'jpa' | 'mongo' = 'jpa',
 ): vscode.CompletionItem[] {
 	const methodMatch = linePrefix.match(/\b(?:find|read|get|query|search|stream|count|exists|delete|remove)\w*By\w*$/);
 	if (!methodMatch) {
@@ -78,10 +86,10 @@ export function createDerivedQueryCompletions(
 		}
 
 		// Suggest operators
-		for (const op of KNOWN_OPERATORS) {
+		for (const op of KNOWN_OPERATORS.filter((operator) => backend === 'jpa' || MONGO_OPERATORS.has(operator))) {
 			if (op.toLowerCase().startsWith(afterProp.toLowerCase())) {
 				const item = new vscode.CompletionItem(op, vscode.CompletionItemKind.Operator);
-				item.detail = `Spring Data JPA Operator: ${op}`;
+				item.detail = `Spring Data ${backend === 'mongo' ? 'MongoDB' : 'JPA'} Operator: ${op}`;
 				item.sortText = `2_${op}`;
 				item.range = new vscode.Range(new vscode.Position(position.line, position.character - afterProp.length), position);
 				items.push(item);

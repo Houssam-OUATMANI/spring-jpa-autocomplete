@@ -18,6 +18,7 @@ export interface EntityProperty {
 	readonly mappedBy?: string;
 	readonly fetchType?: 'EAGER' | 'LAZY';
 	readonly columnName?: string;
+	readonly mongoFieldName?: string;
 	readonly isCollection?: boolean;
 	readonly location?: PropertyLocation;
 }
@@ -32,6 +33,7 @@ export interface EntityInfo {
 	readonly uri: vscode.Uri;
 	readonly isEntity?: boolean;
 	readonly hasEntityAnnotation?: boolean;
+	readonly isMongoDocument?: boolean;
 	readonly isFinal?: boolean;
 	readonly isProjection?: boolean;
 	readonly superclassName?: string;
@@ -57,6 +59,7 @@ const RECORD_DECLARATION = /\brecord\s+([A-Z]\w*)\s*\(([\s\S]*?)\)/;
 const CLASS_DECLARATION = /\b(?:class|interface)\s+([A-Z]\w*)(?:\s+extends\s+([A-Z]\w*))?/;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 const ENTITY_MODEL_ANNOTATION = /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId|GeneratedValue|Column|JoinColumn|ManyToOne|OneToMany|ManyToMany|OneToOne)\b/;
+const MONGO_DOCUMENT_ANNOTATION = /@(?:[\w$]+\.)*Document\b/;
 const RECORD_DECLARATION_KEYWORD = /\brecord\s+[A-Z]\w*\s*[\(<]/;
 const REPOSITORY_INTERFACE = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</;
 const PROJECTION_INTERFACE = /\binterface\s+\w+\b/;
@@ -68,9 +71,10 @@ export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | un
 
 export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes?: ProjectionTypeInfo[]): EntityInfo[] {
 	const hasEntityAnnotation = ENTITY_MODEL_ANNOTATION.test(text);
+	const hasMongoDocument = MONGO_DOCUMENT_ANNOTATION.test(text);
 	const hasRecord = RECORD_DECLARATION_KEYWORD.test(text);
 	const hasProjection = PROJECTION_INTERFACE.test(text) && PROJECTION_GETTER.test(text) && !REPOSITORY_INTERFACE.test(text);
-	if (!hasEntityAnnotation && !hasRecord && !hasProjection) {
+	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection) {
 		if (projectionTypes) {
 			const maskedText = maskJavaSource(text);
 			const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
@@ -113,15 +117,16 @@ export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes
 function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | undefined {
 	const maskedText = maskJavaSource(text);
 	const hasExplicitEntity = ENTITY_ANNOTATION.test(maskedText);
+	const isMongoDocument = /@(?:[\w$]+\.)*Document\b/.test(maskedText);
 	const hasJpaMarkers = JPA_MAPPING_ANNOTATION.test(maskedText);
 	const isMappedSuperclass = MAPPED_SUPERCLASS_ANNOTATION.test(maskedText);
 	const isEmbeddable = EMBEDDABLE_ANNOTATION.test(maskedText);
 	const recordMatch = maskedText.match(RECORD_DECLARATION);
 	const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
 	const projectionMatch = maskedText.match(/\binterface\s+([A-Z]\w*)\b[\s\S]*?\b(?:get|is|has)[A-Z]\w*\s*\(/);
-	const isEntity = hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch && hasJpaMarkers);
+	const isEntity = !isMongoDocument && (hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch && hasJpaMarkers));
 
-	if (!isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch) {
+	if (!isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch && !projectionMatch && !isMongoDocument) {
 		return undefined;
 	}
 	if (projectionMatch && !isEntity && !isMappedSuperclass && !isEmbeddable && !recordMatch) {
@@ -146,6 +151,7 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 			packageName,
 			uri,
 			...(isEntity ? { isEntity: true, hasEntityAnnotation: hasExplicitEntity } : {}),
+			...(isMongoDocument ? { isMongoDocument: true } : {}),
 			isMappedSuperclass,
 			isEmbeddable,
 			properties,
@@ -182,6 +188,7 @@ function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | und
 		packageName,
 		uri,
 		...(isEntity ? { isEntity: true, hasEntityAnnotation: hasExplicitEntity } : {}),
+		...(isMongoDocument ? { isMongoDocument: true } : {}),
 		superclassName,
 		isMappedSuperclass,
 		isEmbeddable,
@@ -254,6 +261,7 @@ function extractClassProperties(text: string, maskedText: string, bodyStart: num
 		const name = field[3];
 		const nameOffset = memberOffset + maskedMember.lastIndexOf(name);
 		const targetEntity = annotations.match(/targetEntity\s*=\s*([A-Z]\w*)\.class/)?.[1];
+		const mongoFieldName = member.match(/@(?:[\w$.]+\.)*Field\s*\(\s*(?:value\s*=\s*)?"([^"]+)"/)?.[1];
 		properties.set(name, {
 			name,
 			type,
@@ -261,6 +269,7 @@ function extractClassProperties(text: string, maskedText: string, bodyStart: num
 			isTransient: false,
 			relation: extractRelation(annotations),
 			targetEntity,
+			mongoFieldName,
 			isCollection: /\b(?:Collection|List|Set|Iterable|Map)<|\[\]/.test(type),
 			location: calculateLocation(text, nameOffset, name.length),
 		});

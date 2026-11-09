@@ -18,6 +18,7 @@ import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
 import { createEntityGraphCompletions, validateEntityGraphs } from './entityGraph/entityGraphSupport';
+import { createMongoQueryCompletions, isMongoRepositoryAt, validateMongoQueries } from './mongoSupport';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -31,8 +32,8 @@ export function shouldDisplayDiagnostic(mode: DiagnosticDisplayMode, severity: '
 }
 
 export function hasJpaDiagnosticTargets(text: string): boolean {
-	return /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</.test(text)
-		|| /@(Query|NativeQuery|EntityGraph)\s*\(/.test(text)
+	return /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</.test(text)
+		|| /@(Query|NativeQuery|Aggregation|EntityGraph)\s*\(/.test(text)
 		|| /@Entity\b/.test(text);
 }
 
@@ -286,17 +287,25 @@ export function activate(context: vscode.ExtensionContext) {
 
 				// A. EntityGraph completion
 				if (/@EntityGraph\b/.test(docText)) {
-					const entityGraphItems = createEntityGraphCompletions(document, position, entities);
+					const entityGraphItems = createEntityGraphCompletions(document, position, entities.filter((entity) => !entity.isMongoDocument));
 					if (entityGraphItems && entityGraphItems.length > 0) {
 						return entityGraphItems;
 					}
 				}
 
+				if (/@(?:Query|Aggregation)\s*\(/.test(docText)) {
+					const mongoQueryItems = createMongoQueryCompletions(document, position, entities);
+					if (mongoQueryItems && mongoQueryItems.length > 0) {
+						return mongoQueryItems;
+					}
+				}
+
 				// B. JPQL Completion inside @Query
-				if (/@(?:Query|NativeQuery)\s*\(/.test(docText)) {
+				if (/@(?:Query|NativeQuery)\s*\(/.test(docText) && !isMongoRepositoryAt(docText, offset)) {
 					const hasNativeQuery = /@NativeQuery\b|nativeQuery\s*=\s*true/.test(docText);
 					const sqlDialect = hasNativeQuery ? await resolveSqlDialect(document, false) : 'generic';
-					const jpqlItems = createJpqlCompletions(document, position, entities, sqlDialect, entityIndex.getAllProjectionTypes());
+					const jpaEntities = entities.filter((entity) => !entity.isMongoDocument);
+					const jpqlItems = createJpqlCompletions(document, position, jpaEntities, sqlDialect, entityIndex.getAllProjectionTypes());
 					if (jpqlItems && jpqlItems.length > 0) {
 						return jpqlItems;
 					}
@@ -308,7 +317,8 @@ export function activate(context: vscode.ExtensionContext) {
 
 				// B. Derived Query & Keyword Completion
 				const properties = findEntityProperties(docText, entities, extractRepositoryEntityNameAt(docText, offset));
-				const derivedItems = createDerivedQueryCompletions(linePrefix, properties, position);
+				const queryBackend = isMongoRepositoryAt(docText, offset) ? 'mongo' : 'jpa';
+				const derivedItems = createDerivedQueryCompletions(linePrefix, properties, position, queryBackend);
 				if (derivedItems.length > 0) {
 					return derivedItems;
 				}
@@ -397,14 +407,16 @@ export function activate(context: vscode.ExtensionContext) {
 		const docText = document.getText();
 		const derivedMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.derivedQueries', 'all');
 		const jpqlMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.jpql', 'all');
+		const mongoMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.mongoQueries', 'all');
 
 		// Check if current file has diagnostic targets
 		const isRepo = derivedMode !== 'off'
-			&& /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
+			&& /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
 		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
+		const hasMongoQueries = mongoMode !== 'off' && /@(Query|Aggregation)\s*\(/.test(docText) && /(?:MongoRepository|ReactiveMongoRepository)\s*</.test(docText);
 		const hasEntityGraphs = jpqlMode !== 'off' && /@EntityGraph\s*\(/.test(docText);
 		const hasEntities = derivedMode !== 'off' && /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId)\b/.test(docText);
-		if (!isRepo && !hasJpqlQueries && !hasEntities && !hasEntityGraphs) {
+		if (!isRepo && !hasJpqlQueries && !hasMongoQueries && !hasEntities && !hasEntityGraphs) {
 			diagnostics.set(document.uri, documentDiagnostics);
 			return;
 		}
@@ -489,9 +501,13 @@ export function activate(context: vscode.ExtensionContext) {
 
 		// B. JPQL Query Diagnostics (@Query annotations, multi-line, text blocks, aliases, params)
 		if (hasJpqlQueries) {
-			const jpqlQueries = extractAllJpqlQueries(docText, entities);
+			const jpaEntities = entities.filter((entity) => !entity.isMongoDocument);
+			const jpqlQueries = extractAllJpqlQueries(docText, jpaEntities);
 			for (const q of jpqlQueries) {
-				const jpqlDiags = validateJpql(q, entities);
+				if (isMongoRepositoryAt(docText, q.queryStartOffset)) {
+					continue;
+				}
+				const jpqlDiags = validateJpql(q, jpaEntities);
 				for (const d of jpqlDiags) {
 					if (!shouldDisplayDiagnostic(jpqlMode, d.severity)) {
 						continue;
@@ -514,10 +530,29 @@ export function activate(context: vscode.ExtensionContext) {
 					documentDiagnostics.push(diagnostic);
 				}
 			}
+
+			if (hasMongoQueries) {
+				for (const diag of validateMongoQueries(docText, entities)) {
+					if (!shouldDisplayDiagnostic(mongoMode, 'error')) {
+						continue;
+					}
+					const diagnostic = new vscode.Diagnostic(
+						new vscode.Range(document.positionAt(diag.startOffset), document.positionAt(diag.endOffset)),
+						diag.message,
+						vscode.DiagnosticSeverity.Error,
+					);
+					diagnostic.source = 'spring-jpa';
+					diagnostic.code = diag.code;
+					if (diag.suggestedProperty) {
+						(diagnostic as vscode.Diagnostic & { suggestedProperty?: string }).suggestedProperty = diag.suggestedProperty;
+					}
+					documentDiagnostics.push(diagnostic);
+				}
+			}
 		}
 
 		if (hasEntityGraphs) {
-			const egDiags = validateEntityGraphs(docText, entities);
+			const egDiags = validateEntityGraphs(docText, entities.filter((entity) => !entity.isMongoDocument));
 			for (const d of egDiags) {
 				if (!shouldDisplayDiagnostic(jpqlMode, d.severity)) {
 					continue;
@@ -536,8 +571,8 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		if (hasEntities) {
-			const currentEntities = entityIndex.getEntitiesForUri(document.uri);
-			const allEntities = entityIndex.getAllEntities();
+			const currentEntities = entityIndex.getEntitiesForUri(document.uri).filter((entity) => !entity.isMongoDocument);
+			const allEntities = entityIndex.getAllEntities().filter((entity) => !entity.isMongoDocument);
 			const entityDiags = validateJpaEntities(currentEntities, allEntities, docText);
 			for (const diag of entityDiags) {
 				if (!shouldDisplayDiagnostic(derivedMode, diag.severity)) {

@@ -16,7 +16,7 @@ export interface StorageMemento {
 }
 
 const CACHE_STORAGE_KEY = 'springJpa.workspaceEntityCache';
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 interface SerializedEntityInfo extends Omit<EntityInfo, 'uri'> {
 	uri: string;
@@ -82,7 +82,7 @@ function rehydrateProjection(item: SerializedProjectionTypeInfo): ProjectionType
 	};
 }
 
-const REPOSITORY_ENTITY = /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
+const REPOSITORY_ENTITY = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
 const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set([
 	'node_modules', 'target', 'build', 'out', '.gradle', '.vscode-test',
@@ -121,7 +121,7 @@ function haveEntitiesChanged(
 	for (let i = 0; i < current.length; i++) {
 		const prev = previous[i];
 		const curr = current[i];
-		if (prev.name !== curr.name || prev.entityName !== curr.entityName || prev.packageName !== curr.packageName) {
+		if (prev.name !== curr.name || prev.entityName !== curr.entityName || prev.packageName !== curr.packageName || prev.isMongoDocument !== curr.isMongoDocument) {
 			return true;
 		}
 		if (prev.properties.length !== curr.properties.length) {
@@ -130,7 +130,7 @@ function haveEntitiesChanged(
 		for (let j = 0; j < curr.properties.length; j++) {
 			const p1 = prev.properties[j];
 			const p2 = curr.properties[j];
-			if (p1.name !== p2.name || p1.type !== p2.type || p1.relation !== p2.relation || p1.targetEntity !== p2.targetEntity) {
+			if (p1.name !== p2.name || p1.type !== p2.type || p1.relation !== p2.relation || p1.targetEntity !== p2.targetEntity || p1.mongoFieldName !== p2.mongoFieldName) {
 				return true;
 			}
 		}
@@ -552,7 +552,7 @@ export function extractRepositoryInfos(text: string, uri: vscode.Uri): Repositor
 			});
 		}
 	}
-	if (repos.length === 0 && (/@(?:Query|NativeQuery)\b/.test(masked) || /\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\b/.test(masked))) {
+	if (repos.length === 0 && (/@(?:Query|NativeQuery|Aggregation)\b/.test(masked) || /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\b/.test(masked))) {
 		const typeMatch = masked.match(/\b(?:interface|class)\s+([A-Za-z_$]\w*)/);
 		const managedEntities = extractRepositoryEntityNames(text);
 		if (typeMatch || managedEntities.length > 0) {
@@ -740,6 +740,7 @@ function addEntityProperties(
 			isId: property.isId,
 			relation: property.relation,
 			targetEntity: property.targetEntity,
+			mongoFieldName: property.mongoFieldName,
 			isCollection: property.isCollection,
 			location: property.location,
 		});
@@ -753,6 +754,7 @@ function addEntityProperties(
 				isId: property.isId,
 				relation: property.relation,
 				targetEntity: property.targetEntity,
+				mongoFieldName: property.mongoFieldName,
 				isCollection: property.isCollection,
 				location: property.location,
 			});

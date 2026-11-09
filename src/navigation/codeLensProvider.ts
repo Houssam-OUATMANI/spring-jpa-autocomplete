@@ -18,7 +18,7 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 		const lenses: vscode.CodeLens[] = [];
 
 		// 1. CodeLens on Repository interfaces: Link to Managed Entity
-		const repositoryMatch = docText.match(/\b(?:JpaRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/);
+		const repositoryMatch = docText.match(/\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/);
 		if (repositoryMatch && repositoryMatch.index !== undefined) {
 			const entity = entityLookup.get(repositoryMatch[1].toLowerCase());
 			if (entity) {
@@ -26,7 +26,7 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 				const range = new vscode.Range(start, document.positionAt(repositoryMatch.index + repositoryMatch[0].length));
 				lenses.push(new vscode.CodeLens(range, {
 					command: 'springJpa.openEntity',
-					title: `Spring Data: Managed Entity '${entity.name}' (${entity.properties.length} properties)`,
+					title: `Spring Data: Managed ${entity.isMongoDocument ? 'Document' : 'Entity'} '${entity.name}' (${entity.properties.length} properties)`,
 					arguments: [entity.uri],
 				}));
 			}
@@ -35,7 +35,7 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 		// 2. CodeLens on Entity classes: Link to Repositories
 		const currentEntities = index.getEntitiesForUri(document.uri);
 		for (const entity of currentEntities) {
-			if (!entity.isEntity || !entity.location) {
+			if ((!entity.isEntity && !entity.isMongoDocument) || !entity.location) {
 				continue;
 			}
 			const entityPos = new vscode.Position(entity.location.line, entity.location.character);

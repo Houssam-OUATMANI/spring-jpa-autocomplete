@@ -1,8 +1,8 @@
 {
 	"name": "spring-jpa-autocomplete",
-	"displayName": "Spring Data JPA Tools",
+	"displayName": "Spring Data JPA & MongoDB Tools",
 	"publisher": "houssam-ouatmani",
-	"description": "Spring Data JPA autocomplete, JPQL validation, entity relations, navigation, and diagnostics for Java repositories.",
+	"description": "Spring Data JPA and MongoDB autocomplete, query validation, navigation, and diagnostics for Java repositories.",
 	"version": "1.1.0",
 	"icon": "thumbnail.png",
 	"galleryBanner": {
@@ -20,6 +20,8 @@
 		"spring",
 		"spring data",
 		"spring data jpa",
+		"mongodb",
+		"spring data mongodb",
 		"jpa",
 		"hibernate",
 		"java",
@@ -77,12 +79,13 @@
 				],
 				"embeddedLanguages": {
 					"meta.embedded.jpql": "jpql",
-					"meta.embedded.sql": "sql"
+					"meta.embedded.sql": "sql",
+					"meta.embedded.mongo": "json"
 				}
 			}
 		],
 		"configuration": {
-			"title": "Spring Data JPA Tools",
+			"title": "Spring Data JPA & MongoDB Tools",
 			"properties": {
 				"springJpa.diagnosticDebounceMs": {
 					"type": "number",
@@ -141,6 +144,17 @@
 					],
 					"default": "all",
 					"description": "Choose which JPQL diagnostics are shown."
+				},
+				"springJpa.diagnostics.mongoQueries": {
+					"type": "string",
+					"enum": [
+						"all",
+						"errors",
+						"warnings",
+						"off"
+					],
+					"default": "all",
+					"description": "Choose which MongoDB query diagnostics are shown."
 				}
 			}
 		}

@@ -3,6 +3,28 @@
   "injectionSelector": "L:source.java",
   "patterns": [
     {
+      "name": "meta.embedded.mongo",
+      "begin": "(@Aggregation\\s*\\([^)]*?pipeline\\s*=\\s*\\{\\s*)(\"\"\"|\")",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
+      "patterns": [{ "include": "#mongo" }]
+    },
+    {
+      "name": "meta.embedded.mongo",
+      "begin": "(@Query\\s*\\(\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")(?=\\s*\\{)",
+      "beginCaptures": {
+        "1": { "name": "entity.name.function.annotation.java" },
+        "2": { "name": "punctuation.definition.string.begin.java" }
+      },
+      "end": "(\"\"\"|(?<!\\\\)\")",
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.java" } },
+      "patterns": [{ "include": "#mongo" }]
+    },
+    {
       "name": "meta.embedded.sql",
       "begin": "(@NativeQuery\\s*\\(\\s*(?:value\\s*=\\s*)?)(\"\"\"|\")",
       "beginCaptures": {
@@ -89,6 +111,19 @@
     }
   ],
   "repository": {
+    "mongo": {
+      "patterns": [
+        {
+          "name": "variable.other.property.mongo",
+          "match": "(['\"])([^'\"$][^'\"]*)(?=['\"]\\s*:)"
+        },
+        { "name": "support.function.mongo", "match": "\\$[A-Za-z][A-Za-z0-9]*" },
+        { "name": "variable.parameter.mongo", "match": "\\?(?:\\d+)?|\\?[A-Za-z_$][A-Za-z0-9_$]*" },
+        { "name": "constant.language.mongo", "match": "\\b(?:true|false|null)\\b" },
+        { "name": "constant.numeric.mongo", "match": "\\b\\d+(?:\\.\\d+)?\\b" },
+        { "name": "keyword.operator.mongo", "match": "[{}\\[\\]:,]" }
+      ]
+    },
     "sql": {
       "patterns": [
         { "name": "comment.block.sql", "begin": "/\\*", "end": "\\*/" },
