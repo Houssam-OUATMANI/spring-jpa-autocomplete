@@ -2,44 +2,38 @@ import * as vscode from 'vscode';
 import { maskJavaSource } from './javaParsing';
 import { createEntityLookup, extractRepositoryEntityNameAt } from './entityDiscovery';
 import { EntityInfo, EntityProperty } from './entityModel';
-import { extractAllJpqlQueries } from './jpql/jpqlParser';
 import { findClosestProperty } from './propertySuggestions';
 import { getMongoOperatorDocumentation, getMongoOperators } from './mongoQueryLanguage';
 
-const MONGO_REPOSITORY_TYPES = /\b(?:MongoRepository|ReactiveMongoRepository)\s*</;
+export const MONGO_REPOSITORY_TYPES = /\b(?:MongoRepository|ReactiveMongoRepository)\s*</;
 
 interface MongoQuerySource {
 	readonly queryContent: string;
-	readonly sourceOffsets: readonly number[];
 	readonly queryStartOffset: number;
 	readonly kind: 'query' | 'aggregation';
 }
 
-export function isMongoRepositoryAt(text: string, offset: number): boolean {
-	const maskedText = maskJavaSource(text);
-	const declarationPattern = /\b(?:interface|class)\s+[\w$]+(?:\s*<[^{};]*>)?\s+(?:extends|implements)\s+([^{}]+)\{/g;
-	let match: RegExpExecArray | null;
+let lastCachedMongoText: string | undefined;
+let lastCachedMongoRanges: { start: number; end: number }[] = [];
 
-	while ((match = declarationPattern.exec(maskedText)) !== null) {
-		const bodyStart = declarationPattern.lastIndex;
-		if (offset < bodyStart) {
-			continue;
-		}
-		let depth = 1;
-		let bodyEnd = bodyStart;
-		for (; bodyEnd < maskedText.length && depth > 0; bodyEnd++) {
-			if (maskedText[bodyEnd] === '{') {
-				depth++;
-			} else if (maskedText[bodyEnd] === '}') {
-				depth--;
-			}
-		}
-		if (offset < bodyEnd && MONGO_REPOSITORY_TYPES.test(match[1])) {
-			return true;
-		}
+export function getMongoRepositoryRanges(text: string): { start: number; end: number }[] {
+	if (!MONGO_REPOSITORY_TYPES.test(text)) {
+		return [];
 	}
+	if (lastCachedMongoText === text) {
+		return lastCachedMongoRanges;
+	}
+	const maskedText = maskJavaSource(text);
+	lastCachedMongoRanges = findMongoRepositoryRanges(maskedText);
+	lastCachedMongoText = text;
+	return lastCachedMongoRanges;
+}
 
-	return false;
+export function isMongoRepositoryAt(text: string, offset: number): boolean {
+	if (!MONGO_REPOSITORY_TYPES.test(text)) {
+		return false;
+	}
+	return getMongoRepositoryRanges(text).some(({ start, end }) => offset >= start && offset <= end);
 }
 
 export interface MongoQueryDiagnostic {
@@ -79,8 +73,11 @@ export function findMongoFieldAccesses(
 	text: string,
 	documents: readonly EntityInfo[],
 ): MongoFieldAccess[] {
+	if (!/@(?:Query|Aggregation)\s*\(/.test(text) || !MONGO_REPOSITORY_TYPES.test(text)) {
+		return [];
+	}
 	const accesses: MongoFieldAccess[] = [];
-	for (const query of extractMongoQueries(text, documents)) {
+	for (const query of extractMongoQueries(text)) {
 		const repositoryEntityName = extractRepositoryEntityNameAt(text, query.queryStartOffset);
 		const fields = getMongoFields(documents, repositoryEntityName, text);
 		for (const key of extractMongoKeys(query.queryContent)) {
@@ -92,8 +89,8 @@ export function findMongoFieldAccesses(
 			accesses.push({
 				entity: field.entity,
 				property: field.property,
-				startOffset: query.sourceOffsets[key.startOffset],
-				endOffset: query.sourceOffsets[key.endOffset - 1] + 1,
+				startOffset: query.queryStartOffset + key.startOffset,
+				endOffset: query.queryStartOffset + key.endOffset,
 			});
 		}
 	}
@@ -187,13 +184,15 @@ export function createMongoQueryCompletions(
 	documents: readonly EntityInfo[],
 ): vscode.CompletionItem[] | undefined {
 	const text = document.getText();
+	if (!/@(?:Query|Aggregation)\s*\(/.test(text) || !MONGO_REPOSITORY_TYPES.test(text)) {
+		return undefined;
+	}
 	const offset = document.offsetAt(position);
-	const query = findMongoQueryAt(text, offset, documents);
+	const query = findMongoQueryAt(text, offset);
 	if (!query) {
 		return undefined;
 	}
-	const cursorOffset = query.sourceOffsets.findIndex((sourceOffset) => sourceOffset >= offset);
-	const contentOffset = cursorOffset < 0 ? query.queryContent.length : cursorOffset;
+	const contentOffset = Math.max(0, Math.min(offset - query.queryStartOffset, query.queryContent.length));
 	const prefix = query.queryContent.slice(0, contentOffset);
 	const optionsValueMatch = prefix.match(/["']\$options["']\s*:\s*["']([^"']*)$/);
 	if (optionsValueMatch) {
@@ -263,14 +262,17 @@ export function createMongoQueryCompletions(
 }
 
 export function validateMongoQueries(text: string, documents: readonly EntityInfo[]): MongoQueryDiagnostic[] {
+	if (!/@(?:Query|Aggregation)\s*\(/.test(text) || !MONGO_REPOSITORY_TYPES.test(text)) {
+		return [];
+	}
 	const diagnostics: MongoQueryDiagnostic[] = [];
-	for (const query of extractMongoQueries(text, documents)) {
+	for (const query of extractMongoQueries(text)) {
 		const repositoryEntityName = extractRepositoryEntityNameAt(text, query.queryStartOffset);
 		const fields = getMongoFields(documents, repositoryEntityName, text);
 		const canValidateFields = !repositoryEntityName || fields.length > 0;
 		const knownFields = new Set(fields.map(({ path }) => path.toLowerCase()));
 		for (const issue of validateMongoStructure(query.queryContent)) {
-			const startOffset = query.sourceOffsets[issue.offset] ?? query.queryStartOffset;
+			const startOffset = query.queryStartOffset + issue.offset;
 			diagnostics.push({
 				message: issue.message,
 				startOffset,
@@ -286,7 +288,7 @@ export function validateMongoQueries(text: string, documents: readonly EntityInf
 				continue;
 			}
 			const startInQuery = match.index + match[0].indexOf(match[3]) + unsupportedOptionIndex;
-			const startOffset = query.sourceOffsets[startInQuery] ?? query.queryStartOffset;
+			const startOffset = query.queryStartOffset + startInQuery;
 			diagnostics.push({
 				message: `Unsupported MongoDB regex option '${match[3][unsupportedOptionIndex]}'. Use i, m, s, or x.`,
 				startOffset,
@@ -296,8 +298,8 @@ export function validateMongoQueries(text: string, documents: readonly EntityInf
 		}
 		for (const key of extractMongoKeys(query.queryContent)) {
 			const propertyName = key.name;
-			const startOffset = query.sourceOffsets[key.startOffset];
-			const endOffset = query.sourceOffsets[key.endOffset - 1] + 1;
+			const startOffset = query.queryStartOffset + key.startOffset;
+			const endOffset = query.queryStartOffset + key.endOffset;
 			if (propertyName.startsWith('$')) {
 				if (!knownMongoOperators.has(propertyName)) {
 					const suggestion = findClosestProperty(propertyName, [...knownMongoOperators]);
@@ -497,10 +499,13 @@ export function getMongoOperatorAt(
 	offset: number,
 	documents: readonly EntityInfo[],
 ): { name: string; startOffset: number; endOffset: number } | undefined {
-	for (const query of extractMongoQueries(text, documents)) {
+	if (!/@(?:Query|Aggregation)\s*\(/.test(text) || !MONGO_REPOSITORY_TYPES.test(text)) {
+		return undefined;
+	}
+	for (const query of extractMongoQueries(text)) {
 		for (const match of query.queryContent.matchAll(/\$[A-Za-z][A-Za-z0-9]*/g)) {
-			const startOffset = query.sourceOffsets[match.index];
-			const endOffset = query.sourceOffsets[match.index + match[0].length - 1] + 1;
+			const startOffset = query.queryStartOffset + match.index;
+			const endOffset = startOffset + match[0].length;
 			if (offset >= startOffset && offset <= endOffset && getMongoOperatorDocumentation(match[0])) {
 				return { name: match[0], startOffset, endOffset };
 			}
@@ -558,35 +563,83 @@ function getMongoFields(
 	return [...fields.values()];
 }
 
-function extractMongoQueries(text: string, documents: readonly EntityInfo[]): MongoQuerySource[] {
-	const queries: MongoQuerySource[] = extractAllJpqlQueries(text, documents)
-		.filter((query) => isMongoRepositoryAt(text, query.queryStartOffset))
-		.map((query) => ({
-			queryContent: query.queryContent,
-			sourceOffsets: query.sourceOffsets,
-			queryStartOffset: query.queryStartOffset,
-			kind: 'query',
-		}));
+function extractMongoQueries(text: string): MongoQuerySource[] {
+	if (!/@(?:Query|Aggregation)\s*\(/.test(text) || !MONGO_REPOSITORY_TYPES.test(text)) {
+		return [];
+	}
+	const repositoryRanges = getMongoRepositoryRanges(text);
+	if (repositoryRanges.length === 0) {
+		return [];
+	}
 	const maskedText = maskJavaSource(text);
-	const aggregationPattern = /@Aggregation\s*\(/g;
-	let match: RegExpExecArray | null;
-	while ((match = aggregationPattern.exec(maskedText)) !== null) {
-		const openingParen = maskedText.indexOf('(', match.index);
+	const queries: MongoQuerySource[] = [];
+	const queryPattern = /@Query\s*\(/g;
+	let queryMatch: RegExpExecArray | null;
+	while ((queryMatch = queryPattern.exec(maskedText)) !== null) {
+		const range = repositoryRanges.find(({ start, end }) => queryMatch!.index >= start && queryMatch!.index <= end);
+		if (!range) {
+			continue;
+		}
+		const openingParen = maskedText.indexOf('(', queryMatch.index);
 		const closingParen = findClosingParenthesis(maskedText, openingParen);
-		if (closingParen < 0 || !isMongoRepositoryAt(text, match.index)) {
+		if (closingParen < 0) {
+			queryPattern.lastIndex = openingParen + 1;
 			continue;
 		}
 		const argsStart = openingParen + 1;
 		const args = text.slice(argsStart, closingParen);
+		const firstValue = args.match(/^\s*(?:value\s*=\s*)?("""[\s\S]*?"""|"(?:\\.|[^"\\])*")/);
+		if (!firstValue) {
+			queryPattern.lastIndex = closingParen + 1;
+			continue;
+		}
+		const content = firstValue[1].startsWith('"""')
+			? firstValue[1].slice(3, -3)
+			: firstValue[1].slice(1, -1);
+		const contentStart = argsStart + firstValue.index! + firstValue[0].indexOf(firstValue[1]) + (firstValue[1].startsWith('"""') ? 3 : 1);
+		queries.push({
+			queryContent: content,
+			queryStartOffset: contentStart,
+			kind: 'query',
+		});
+		queryPattern.lastIndex = closingParen + 1;
+	}
+
+	const aggregationPattern = /@Aggregation\s*\(/g;
+	let match: RegExpExecArray | null;
+	while ((match = aggregationPattern.exec(maskedText)) !== null) {
+		const range = repositoryRanges.find(({ start, end }) => match!.index >= start && match!.index <= end);
+		if (!range) {
+			continue;
+		}
+		const openingParen = maskedText.indexOf('(', match.index);
+		const closingParen = findClosingParenthesis(maskedText, openingParen);
+		if (closingParen < 0) {
+			aggregationPattern.lastIndex = openingParen + 1;
+			continue;
+		}
+		const argsStart = openingParen + 1;
+		const args = text.slice(argsStart, closingParen);
+		const maskedArgs = maskedText.slice(argsStart, closingParen);
+		const pipelineStartMatch = maskedArgs.match(/\bpipeline\s*=\s*\{/);
+		if (!pipelineStartMatch || pipelineStartMatch.index === undefined) {
+			aggregationPattern.lastIndex = closingParen + 1;
+			continue;
+		}
+		const pipelineOpeningBrace = argsStart + pipelineStartMatch.index + pipelineStartMatch[0].lastIndexOf('{');
+		const pipelineClosingBrace = findMatchingBrace(maskedText, pipelineOpeningBrace);
+		if (pipelineClosingBrace < 0) {
+			aggregationPattern.lastIndex = closingParen + 1;
+			continue;
+		}
+		const pipelineText = text.slice(pipelineOpeningBrace + 1, pipelineClosingBrace);
 		const stringPattern = /"""([\s\S]*?)"""|"((?:\\.|[^"\\])*)"/g;
 		let stringMatch: RegExpExecArray | null;
-		while ((stringMatch = stringPattern.exec(args)) !== null) {
+		while ((stringMatch = stringPattern.exec(pipelineText)) !== null) {
 			const content = stringMatch[1] ?? stringMatch[2];
-			const groupOffset = stringMatch[1] !== undefined ? stringMatch[0].indexOf(content) : stringMatch[0].indexOf(content);
-			const contentStart = argsStart + stringMatch.index + groupOffset;
+			const contentStart = pipelineOpeningBrace + 1 + stringMatch.index + stringMatch[0].indexOf(content);
 			queries.push({
 				queryContent: content,
-				sourceOffsets: [...content].map((_character, index) => contentStart + index),
 				queryStartOffset: contentStart,
 				kind: 'aggregation',
 			});
@@ -596,11 +649,30 @@ function extractMongoQueries(text: string, documents: readonly EntityInfo[]): Mo
 	return queries;
 }
 
-function findMongoQueryAt(text: string, offset: number, documents: readonly EntityInfo[]): MongoQuerySource | undefined {
-	return extractMongoQueries(text, documents).find((query) =>
-		query.sourceOffsets.length > 0
-		&& offset >= query.sourceOffsets[0]
-		&& offset <= query.sourceOffsets[query.sourceOffsets.length - 1] + 1,
+function findMongoRepositoryRanges(maskedText: string): { start: number; end: number }[] {
+	const ranges: { start: number; end: number }[] = [];
+	const declarationPattern = /\b(?:interface|class)\s+[\w$]+(?:\s*<[^{};]*>)?\s+(?:extends|implements)\s+([^{}]+)\{/g;
+	let match: RegExpExecArray | null;
+	while ((match = declarationPattern.exec(maskedText)) !== null) {
+		if (!MONGO_REPOSITORY_TYPES.test(match[1])) {
+			continue;
+		}
+		const bodyStart = declarationPattern.lastIndex;
+		const bodyEnd = findMatchingBrace(maskedText, bodyStart - 1);
+		if (bodyEnd >= 0) {
+			ranges.push({ start: bodyStart, end: bodyEnd });
+			declarationPattern.lastIndex = bodyEnd + 1;
+		} else {
+			declarationPattern.lastIndex = bodyStart;
+		}
+	}
+	return ranges;
+}
+
+function findMongoQueryAt(text: string, offset: number): MongoQuerySource | undefined {
+	return extractMongoQueries(text).find((query) =>
+		offset >= query.queryStartOffset
+		&& offset <= query.queryStartOffset + query.queryContent.length,
 	);
 }
 
@@ -615,6 +687,9 @@ function findMongoTemplateMethod(
 }
 
 function findMongoTemplateMethods(text: string, documents: readonly EntityInfo[]): MongoTemplateMethod[] {
+	if (!/\b(?:Reactive)?MongoTemplate\b/.test(text) || !/\bCriteria\s*\.\s*where\s*\(/.test(text)) {
+		return [];
+	}
 	const maskedText = maskJavaSource(text);
 	if (!/\b(?:Reactive)?MongoTemplate\b/.test(maskedText)) {
 		return [];
@@ -622,12 +697,13 @@ function findMongoTemplateMethods(text: string, documents: readonly EntityInfo[]
 	const methods: MongoTemplateMethod[] = [];
 	const repositoryPackage = text.match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
 	const entityLookup = createEntityLookup(documents.filter((entity) => entity.isMongoDocument), repositoryPackage, text);
-	const methodPattern = /\b(?:(?:public|protected|private)\s+)?(?:(?:static|final|synchronized)\s+)*[\w$.,<>\[\]? ]+\s+[\w$]+\s*\([^;{}]*\)\s*(?:throws\s+[\w$.,\s]+)?\{/g;
+	const methodPattern = /\b(?:public|protected|private|static|final|synchronized|\s)*[\w$.,<>\[\]?]+(?:\s*<[^{};]*>)?\s+[\w$]+\s*\([^;{}]*\)\s*(?:throws\s+[^{]+)?\{/g;
 	let match: RegExpExecArray | null;
 	while ((match = methodPattern.exec(maskedText)) !== null) {
 		const bodyStartOffset = methodPattern.lastIndex;
 		const bodyEndOffset = findMatchingBrace(maskedText, bodyStartOffset - 1);
 		if (bodyEndOffset < 0) {
+			methodPattern.lastIndex = bodyStartOffset;
 			continue;
 		}
 		const body = text.slice(bodyStartOffset, bodyEndOffset);

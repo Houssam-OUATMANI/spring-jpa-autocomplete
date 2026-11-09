@@ -79,19 +79,29 @@ export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes
 		return [];
 	}
 	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection && projectionTypes) {
-		const maskedText = maskJavaSource(text);
-		const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
-		for (const match of maskedText.matchAll(/\b(class|interface)\s+([A-Za-z_$]\w*)/g)) {
-			const bodyStart = maskedText.indexOf('{', (match.index ?? 0) + match[0].length);
-			const bodyEnd = bodyStart < 0 ? -1 : findMatchingBrace(maskedText, bodyStart);
+		const packageName = text.match(PACKAGE_DECLARATION)?.[1];
+		for (const match of text.matchAll(/\b(class|interface)\s+([A-Za-z_$]\w*)/g)) {
+			let cachedProperties: EntityProperty[] | undefined;
+			const typeName = match[2];
+			const kind = match[1] as ProjectionTypeInfo['kind'];
+			const matchIndex = match.index ?? 0;
+			const matchLen = match[0].length;
 			projectionTypes.push({
-				name: match[2],
+				name: typeName,
 				packageName,
-				kind: match[1] as ProjectionTypeInfo['kind'],
+				kind,
 				uri,
-				properties: bodyStart >= 0 && bodyEnd >= 0
-					? extractClassProperties(text, maskedText, bodyStart, false, bodyEnd)
-					: [],
+				get properties() {
+					if (!cachedProperties) {
+						const masked = maskJavaSource(text);
+						const bodyStart = masked.indexOf('{', matchIndex + matchLen);
+						const bodyEnd = bodyStart < 0 ? -1 : findMatchingBrace(masked, bodyStart);
+						cachedProperties = bodyStart >= 0 && bodyEnd >= 0
+							? extractClassProperties(text, masked, bodyStart, false, bodyEnd)
+							: [];
+					}
+					return cachedProperties;
+				},
 			});
 		}
 		return [];

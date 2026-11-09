@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
-import { findMongoFieldAccesses, findMongoTemplateFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
+import { findMongoFieldAccesses, findMongoTemplateFieldAccesses, getMongoRepositoryRanges, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
 
 export class SpringJpaRenameProvider implements vscode.RenameProvider {
 	public prepareRename(
@@ -63,31 +63,42 @@ export class SpringJpaRenameProvider implements vscode.RenameProvider {
 			}
 			const text = doc.getText();
 
-			for (const access of [...findMongoFieldAccesses(text, allEntities), ...findMongoTemplateFieldAccesses(text, allEntities)]) {
-				if (access.entity.uri.toString() === entity.uri.toString()
-					&& access.property.name.toLowerCase() === oldName.toLowerCase()
-					&& !access.property.mongoFieldName) {
-					edit.replace(
-						doc.uri,
-						new vscode.Range(doc.positionAt(access.startOffset), doc.positionAt(access.endOffset)),
-						newName,
-					);
+			const hasMongoRepo = MONGO_REPOSITORY_TYPES.test(text) && /@(?:Query|Aggregation)\s*\(/.test(text);
+			const hasMongoTemplate = /\b(?:Reactive)?MongoTemplate\b/.test(text) && /\bCriteria\s*\.\s*where\s*\(/.test(text);
+			if (hasMongoRepo || hasMongoTemplate) {
+				const accesses = [
+					...(hasMongoRepo ? findMongoFieldAccesses(text, allEntities) : []),
+					...(hasMongoTemplate ? findMongoTemplateFieldAccesses(text, allEntities) : []),
+				];
+				for (const access of accesses) {
+					if (access.entity.uri.toString() === entity.uri.toString()
+						&& access.property.name.toLowerCase() === oldName.toLowerCase()
+						&& !access.property.mongoFieldName) {
+						edit.replace(
+							doc.uri,
+							new vscode.Range(doc.positionAt(access.startOffset), doc.positionAt(access.endOffset)),
+							newName,
+						);
+					}
 				}
 			}
 
 			// Replace in JPQL queries
-			const jpqlQueries = extractAllJpqlQueries(text, allEntities);
-			for (const query of jpqlQueries) {
-				if (isMongoRepositoryAt(text, query.queryStartOffset)) {
-					continue;
-				}
-				for (const access of query.propertyAccesses) {
-					const targetEntity = query.aliases.get(access.alias);
-					if (targetEntity && targetEntity.toLowerCase() === entity.name.toLowerCase()) {
-						if (access.property.toLowerCase() === oldName.toLowerCase()) {
-							const start = doc.positionAt(access.startOffset);
-							const end = doc.positionAt(access.endOffset);
-							edit.replace(doc.uri, new vscode.Range(start, end), newName);
+			if (/@(Query|NativeQuery)\s*\(/.test(text)) {
+				const jpqlQueries = extractAllJpqlQueries(text, allEntities);
+				const mongoRanges = hasMongoRepo ? getMongoRepositoryRanges(text) : [];
+				for (const query of jpqlQueries) {
+					if (mongoRanges.some(r => query.queryStartOffset >= r.start && query.queryStartOffset <= r.end)) {
+						continue;
+					}
+					for (const access of query.propertyAccesses) {
+						const targetEntity = query.aliases.get(access.alias);
+						if (targetEntity && targetEntity.toLowerCase() === entity.name.toLowerCase()) {
+							if (access.property.toLowerCase() === oldName.toLowerCase()) {
+								const start = doc.positionAt(access.startOffset);
+								const end = doc.positionAt(access.endOffset);
+								edit.replace(doc.uri, new vscode.Range(start, end), newName);
+							}
 						}
 					}
 				}

@@ -1,4 +1,4 @@
-import { createEntityLookup, resolveEntityHierarchy } from '../entityDiscovery';
+import { createEntityLookup, referencedEntityNames, resolveEntityHierarchy } from '../entityDiscovery';
 import { EntityInfo, EntityProperty, ProjectionTypeInfo } from '../entityModel';
 import { MethodSignatureInfo } from './queryValidator';
 import { parseDerivedMethodName, ParsedPredicate } from './queryParser';
@@ -176,12 +176,23 @@ function resolveMongoPropertyPath(
 	embeddedTypes: readonly ProjectionTypeInfo[] = [],
 ): string | undefined {
 	const packageName = repositoryText?.match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
-	const embeddedEntities: EntityInfo[] = embeddedTypes.flatMap((type) => type.properties ? [{
-		name: type.name,
-		packageName: type.packageName,
-		uri: type.uri,
-		properties: type.properties,
-	}] : []);
+	const rootEntity = entities.find((e) => e.name.toLowerCase() === entityName.toLowerCase());
+	const relevantTypeNames = new Set<string>();
+	if (rootEntity) {
+		for (const p of rootEntity.properties) {
+			for (const refName of referencedEntityNames(p.type)) {
+				relevantTypeNames.add(refName.toLowerCase());
+			}
+		}
+	}
+	const embeddedEntities: EntityInfo[] = embeddedTypes
+		.filter((type) => relevantTypeNames.size === 0 || relevantTypeNames.has(type.name.toLowerCase()))
+		.flatMap((type) => type.properties ? [{
+			name: type.name,
+			packageName: type.packageName,
+			uri: type.uri,
+			properties: type.properties,
+		}] : []);
 	const lookup = createEntityLookup([...entities, ...embeddedEntities], packageName, repositoryText);
 	let currentEntity = lookup.get(entityName.toLowerCase());
 	const javaPath = currentEntity

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
-import { findMongoFieldAt, findMongoTemplateFieldAccesses, isMongoRepositoryAt } from '../mongoSupport';
+import { findMongoFieldAt, findMongoTemplateFieldAccesses, isMongoRepositoryAt, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
 
 export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 	public async provideDefinition(
@@ -35,19 +35,24 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		// 2. Navigation inside @Query
 		const docText = document.getText();
 		const offset = document.offsetAt(position);
-		const mongoField = findMongoFieldAt(docText, offset, entities);
-		const mongoTemplateField = findMongoTemplateFieldAccesses(docText, entities).find((field) =>
-			offset >= field.startOffset && offset <= field.endOffset,
-		);
-		const mongoFieldLocation = mongoField ?? mongoTemplateField;
+		const hasMongoRepo = MONGO_REPOSITORY_TYPES.test(docText) && /@(?:Query|Aggregation)\s*\(/.test(docText);
+		const hasMongoTemplate = /\b(?:Reactive)?MongoTemplate\b/.test(docText) && /\bCriteria\s*\.\s*where\s*\(/.test(docText);
+
+		let mongoFieldLocation = hasMongoRepo ? findMongoFieldAt(docText, offset, entities) : undefined;
+		if (!mongoFieldLocation && hasMongoTemplate) {
+			mongoFieldLocation = findMongoTemplateFieldAccesses(docText, entities).find((field) =>
+				offset >= field.startOffset && offset <= field.endOffset,
+			);
+		}
 		if (mongoFieldLocation?.property.location) {
 			return new vscode.Location(
 				mongoFieldLocation.entity.uri,
 				new vscode.Position(mongoFieldLocation.property.location.line, mongoFieldLocation.property.location.character),
 			);
 		}
-		const jpqlQueries = extractAllJpqlQueries(docText, entities);
-		const activeQuery = isMongoRepositoryAt(docText, offset) ? undefined : jpqlQueries.find(
+		const hasJpql = /@(Query|NativeQuery)\s*\(/.test(docText);
+		const jpqlQueries = hasJpql ? extractAllJpqlQueries(docText, entities) : [];
+		const activeQuery = (hasMongoRepo && isMongoRepositoryAt(docText, offset)) ? undefined : jpqlQueries.find(
 			(q) => offset >= q.queryStartOffset && offset <= q.queryEndOffset,
 		);
 

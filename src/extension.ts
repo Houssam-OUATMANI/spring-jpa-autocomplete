@@ -18,7 +18,7 @@ import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
 import { createEntityGraphCompletions, validateEntityGraphs } from './entityGraph/entityGraphSupport';
-import { createMongoQueryCompletions, createMongoTemplateCompletions, isMongoRepositoryAt, validateMongoQueries, validateMongoTemplateQueries } from './mongoSupport';
+import { createMongoQueryCompletions, createMongoTemplateCompletions, getMongoRepositoryRanges, isMongoRepositoryAt, MONGO_REPOSITORY_TYPES, validateMongoQueries, validateMongoTemplateQueries } from './mongoSupport';
 
 export { createKeywordItem, extractMethodParameterNames } from './legacyHelpers';
 
@@ -285,9 +285,11 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 				const entities = getIndexedEntities(document);
 
-				const mongoTemplateItems = createMongoTemplateCompletions(document, position, entities);
-				if (mongoTemplateItems && mongoTemplateItems.length > 0) {
-					return mongoTemplateItems;
+				if (/\b(?:Reactive)?MongoTemplate\b/.test(docText) && /\bCriteria\s*\.\s*where\s*\(/.test(docText)) {
+					const mongoTemplateItems = createMongoTemplateCompletions(document, position, entities);
+					if (mongoTemplateItems && mongoTemplateItems.length > 0) {
+						return mongoTemplateItems;
+					}
 				}
 
 				// A. EntityGraph completion
@@ -298,7 +300,7 @@ export function activate(context: vscode.ExtensionContext) {
 					}
 				}
 
-				if (/@(?:Query|Aggregation)\s*\(/.test(docText)) {
+				if (/@(?:Query|Aggregation)\s*\(/.test(docText) && /\b(?:MongoRepository|ReactiveMongoRepository)\s*</.test(docText)) {
 					const mongoQueryItems = createMongoQueryCompletions(document, position, entities);
 					if (mongoQueryItems && mongoQueryItems.length > 0) {
 						return mongoQueryItems;
@@ -413,12 +415,16 @@ export function activate(context: vscode.ExtensionContext) {
 		const derivedMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.derivedQueries', 'all');
 		const jpqlMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.jpql', 'all');
 		const mongoMode = vscode.workspace.getConfiguration('springJpa').get<DiagnosticDisplayMode>('diagnostics.mongoQueries', 'all');
+		const hasMongoRepository = /\b(?:MongoRepository|ReactiveMongoRepository)\s*</.test(docText);
+		const hasJpaRepository = /\b(?:JpaRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*</.test(docText);
 
 		// Check if current file has diagnostic targets
 		const isRepo = derivedMode !== 'off'
 			&& /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor)\s*<\s*[A-Z]\w*/.test(docText);
-		const hasJpqlQueries = jpqlMode !== 'off' && /@(Query|NativeQuery)\s*\(/.test(docText);
-		const hasMongoQueries = mongoMode !== 'off' && /@(Query|Aggregation)\s*\(/.test(docText) && /(?:MongoRepository|ReactiveMongoRepository)\s*</.test(docText);
+		const hasJpqlQueries = jpqlMode !== 'off'
+			&& /@(Query|NativeQuery)\s*\(/.test(docText)
+			&& (!hasMongoRepository || hasJpaRepository);
+		const hasMongoQueries = mongoMode !== 'off' && /@(Query|Aggregation)\s*\(/.test(docText) && hasMongoRepository;
 		const hasMongoTemplate = mongoMode !== 'off' && /\b(?:Reactive)?MongoTemplate\b/.test(docText) && /\bCriteria\s*\.\s*where\s*\(/.test(docText);
 		const hasEntityGraphs = jpqlMode !== 'off' && /@EntityGraph\s*\(/.test(docText);
 		const hasEntities = derivedMode !== 'off' && /@(?:[\w$]+\.)*(?:Entity|MappedSuperclass|Embeddable|Table|Id|EmbeddedId)\b/.test(docText);
@@ -509,8 +515,9 @@ export function activate(context: vscode.ExtensionContext) {
 		if (hasJpqlQueries) {
 			const jpaEntities = entities.filter((entity) => !entity.isMongoDocument);
 			const jpqlQueries = extractAllJpqlQueries(docText, jpaEntities);
+			const mongoRanges = hasMongoRepository ? getMongoRepositoryRanges(docText) : [];
 			for (const q of jpqlQueries) {
-				if (isMongoRepositoryAt(docText, q.queryStartOffset)) {
+				if (mongoRanges.some((r) => q.queryStartOffset >= r.start && q.queryStartOffset <= r.end)) {
 					continue;
 				}
 				const jpqlDiags = validateJpql(q, jpaEntities);

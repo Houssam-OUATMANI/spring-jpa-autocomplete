@@ -27,7 +27,7 @@ import { convertDerivedQueryToMongoQuery } from '../derivedQuery/queryToMongo';
 import { SpringJpaReferenceProvider } from '../navigation/referenceProvider';
 import { SpringJpaRenameProvider } from '../navigation/renameProvider';
 import { createEntityGraphCompletions, validateEntityGraphs } from '../entityGraph/entityGraphSupport';
-import { createMongoQueryCompletions, createMongoTemplateCompletions, findMongoFieldAccesses, getMongoOperatorAt, isMongoRepositoryAt, validateMongoQueries, validateMongoTemplateQueries } from '../mongoSupport';
+import { createMongoQueryCompletions, createMongoTemplateCompletions, findMongoFieldAccesses, getMongoOperatorAt, getMongoRepositoryRanges, isMongoRepositoryAt, validateMongoQueries, validateMongoTemplateQueries } from '../mongoSupport';
 
 suite('Extension Test Suite', () => {
 	// ==========================================
@@ -2603,5 +2603,38 @@ public class OrderService {
 		assert.strictEqual(projectionTypes[0].name, 'OrderService');
 		assert.strictEqual(projectionTypes[0].packageName, 'com.example.service');
 		assert.strictEqual(projectionTypes[0].kind, 'class');
+	});
+
+	test('getMongoRepositoryRanges caches repository ranges for identical text', () => {
+		const repoSrc = `
+package com.example;
+import org.springframework.data.mongodb.repository.MongoRepository;
+public interface UserRepository extends MongoRepository<User, String> {
+    void findByName(String name);
+}
+`;
+		const ranges1 = getMongoRepositoryRanges(repoSrc);
+		const ranges2 = getMongoRepositoryRanges(repoSrc);
+		assert.strictEqual(ranges1, ranges2, 'Should return cached range array reference');
+		assert.strictEqual(ranges1.length, 1);
+		assert.strictEqual(isMongoRepositoryAt(repoSrc, ranges1[0].start + 5), true);
+		assert.strictEqual(isMongoRepositoryAt(repoSrc, 0), false);
+	});
+
+	test('Mongo template queries handle unclosed braces and malformed methods without hanging', () => {
+		const malformedSrc = `
+package com.example;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+public class CustomService {
+    private MongoTemplate mongoTemplate;
+    public void unclosedMethod( {
+        mongoTemplate.find(Query.query(Criteria.where("test")), User.class);
+`;
+		const start = Date.now();
+		const diags = validateMongoTemplateQueries(malformedSrc, []);
+		const elapsed = Date.now() - start;
+		assert.ok(elapsed < 200, `Parsing should be instantaneous (<200ms), took ${elapsed}ms`);
+		assert.ok(Array.isArray(diags));
 	});
 });

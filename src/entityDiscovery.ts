@@ -56,7 +56,9 @@ function serializeRepository(repo: RepositoryInfo): SerializedRepositoryInfo {
 
 function serializeProjection(proj: ProjectionTypeInfo): SerializedProjectionTypeInfo {
 	return {
-		...proj,
+		name: proj.name,
+		packageName: proj.packageName,
+		kind: proj.kind,
 		uri: proj.uri.toString(),
 	};
 }
@@ -76,9 +78,32 @@ function rehydrateRepository(item: SerializedRepositoryInfo): RepositoryInfo {
 }
 
 function rehydrateProjection(item: SerializedProjectionTypeInfo): ProjectionTypeInfo {
+	const uri = typeof item.uri === 'string' ? vscode.Uri.parse(item.uri) : item.uri;
+	let cachedProps: EntityProperty[] | undefined;
 	return {
-		...item,
-		uri: typeof item.uri === 'string' ? vscode.Uri.parse(item.uri) : item.uri,
+		name: item.name,
+		packageName: item.packageName,
+		kind: item.kind,
+		uri,
+		get properties() {
+			if (!cachedProps) {
+				try {
+					const fs = require('fs');
+					if (uri.scheme === 'file' && fs.existsSync(uri.fsPath)) {
+						const text = fs.readFileSync(uri.fsPath, 'utf8');
+						const dummy: ProjectionTypeInfo[] = [];
+						parseEntityModels(text, uri, dummy);
+						const found = dummy.find((d) => d.name === item.name);
+						cachedProps = found?.properties ? [...found.properties] : [];
+					} else {
+						cachedProps = [];
+					}
+				} catch {
+					cachedProps = [];
+				}
+			}
+			return cachedProps;
+		},
 	};
 }
 
