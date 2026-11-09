@@ -1,9 +1,30 @@
-﻿# Change Log
+# Change Log
 
 All notable changes to the "Spring Data JPA Tools" extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+
+## [2.0.0] - 2026-11-09
+
+### Added
+
+- **Spring Data MongoDB Support** — Full-featured MongoDB repository and query support:
+  - **Document Indexing**: Indexes `@Document` classes independently from JPA entities, including `@Field("...")` mapping annotations, ID identification, and nested document models.
+  - **Synchronous & Reactive Repositories**: Full support for both `MongoRepository<T, ID>` and `ReactiveMongoRepository<T, ID>`.
+  - **Autocomplete in `@Query` and `@Aggregation`**: Context-aware completion inside Mongo JSON query strings for mapped field paths, nested dotted paths, logical operators (`$and`, `$or`, `$nor`), comparison and array operators (`$gt`, `$gte`, `$in`, `$elemMatch`, etc.), regex options (`$options`), and aggregation stages.
+  - **Live Query Diagnostics & Validation**: Catches unknown document fields, misspelled operators with typo correction suggestions, unsupported regex flags, and unclosed quotes or braces (`UNKNOWN_MONGO_FIELD`, `UNKNOWN_MONGO_OPERATOR`, `INVALID_MONGO_QUERY`).
+  - **`MongoTemplate` & `ReactiveMongoTemplate` Criteria Support**: Auto-completion and validation for document fields inside `Criteria.where(...)`, `.and(...)`, `.set(...)`, `.inc(...)`, `.push(...)`, etc., based on the template operation's target document class.
+  - **Convert to @Query (MongoDB) Refactoring**: One-click Quick-Fix (`Alt+Enter`) that translates representable derived query methods into equivalent Mongo JSON queries with positional parameters (`?0`, `?1`), mapped `@Field` names, regex flags for substring matching, sorting, and count/exists/delete options. Supports nested embedded POJOs and collection elements (e.g. `findByTagsName` $\to$ `tags.name`).
+  - **Navigation & Refactoring**: Go to Definition (`F12`), Find References (`Shift+F12`), and Rename (`F2`) support across MongoDB documents, repository methods, and `@Query` expressions.
+  - **Independent Configuration**: Toggle or filter MongoDB query diagnostics via `springJpa.diagnostics.mongoQueries` (`all`, `errors`, `warnings`, `off`).
+
+### Performance & Optimizations
+
+- **Lazy Projection Type Property Evaluation** — Fast-path indexing for non-entity Java files (< 0.1 ms per file) with lazy on-demand property extraction, avoiding eager AST scans of arbitrary workspace classes.
+- **Single-Pass Memoized Repository Scope Scanning** — Cached repository ranges eliminate redundant full-document masking during keystrokes and diagnostic refreshes.
+- **ReDoS Prevention & Safe Token Scanning** — Non-backtracking method signature regexes and guarded loop bounds preventing extension host stalls on incomplete or unclosed syntax.
+- **Zero-Allocation Query Offset Mapping** — Replaced full query-length array allocations with direct mathematical offset translation, drastically reducing garbage collector pressure during typing.
 
 ## [1.1.0] - 2026-11-05
 

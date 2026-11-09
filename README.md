@@ -1,6 +1,6 @@
 # Spring Data JPA & MongoDB Tools
 
-**Version 1.1.0**
+**Version 2.0.0**
 
 [Install from Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 <br>
@@ -222,7 +222,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The latest release is `1.1.0`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
+The latest release is `2.0.0`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ## Requirements
 
