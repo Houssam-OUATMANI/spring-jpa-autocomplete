@@ -228,36 +228,19 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Incremental file watcher for Java files
 	const watcher = vscode.workspace.createFileSystemWatcher('**/*.java');
-	watcher.onDidChange(async (uri) => {
+	const indexWatchedDocument = async (uri: vscode.Uri) => {
 		if (isExcludedJavaUri(uri, vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true))) {
 			return;
 		}
 		try {
 			const doc = await vscode.workspace.openTextDocument(uri);
-			entityIndex.updateDocument(doc);
-			scheduleJavaDiagnostics(doc);
-			if (entityIndex.didLastUpdateCauseStructuralChange()) {
-				scheduleWorkspaceJavaDiagnostics(uri.toString());
-			}
-		} catch {
-			// ignore
+			await indexJavaDocument(doc);
+		} catch (error) {
+			output.appendLine(`Could not index Java file ${uri.toString()}: ${error instanceof Error ? error.message : String(error)}`);
 		}
-	});
-	watcher.onDidCreate(async (uri) => {
-		if (isExcludedJavaUri(uri, vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true))) {
-			return;
-		}
-		try {
-			const doc = await vscode.workspace.openTextDocument(uri);
-			entityIndex.updateDocument(doc);
-			scheduleJavaDiagnostics(doc);
-			if (entityIndex.didLastUpdateCauseStructuralChange()) {
-				scheduleWorkspaceJavaDiagnostics(uri.toString());
-			}
-		} catch {
-			// ignore
-		}
-	});
+	};
+	watcher.onDidChange(indexWatchedDocument);
+	watcher.onDidCreate(indexWatchedDocument);
 	watcher.onDidDelete((uri) => {
 		if (isExcludedJavaUri(uri, vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true))) {
 			return;
@@ -640,11 +623,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		diagnosticTimers.set(key, setTimeout(() => {
 			diagnosticTimers.delete(key);
-			entityIndex.updateDocument(document);
-			void refreshJavaDiagnostics(document);
-			if (cascade && entityIndex.didLastUpdateCauseStructuralChange()) {
-				scheduleWorkspaceJavaDiagnostics(document.uri.toString());
-			}
+			void indexJavaDocument(document, false, cascade);
 		}, Math.max(0, vscode.workspace.getConfiguration('springJpa').get<number>('diagnosticDebounceMs', 150))));
 	};
 
@@ -656,15 +635,25 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	};
 
+	const indexJavaDocument = async (document: vscode.TextDocument, persist = false, cascade = true): Promise<boolean> => {
+		try {
+			const structuralChange = await entityIndex.updateDocumentAsync(document, persist);
+			await refreshJavaDiagnostics(document);
+			if (cascade && structuralChange) {
+				scheduleWorkspaceJavaDiagnostics(document.uri.toString());
+			}
+			return structuralChange;
+		} catch (error) {
+			output.appendLine(`Could not index Java file ${document.uri.toString()}: ${error instanceof Error ? error.message : String(error)}`);
+			return false;
+		}
+	};
+
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument((document) => {
 		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
 			return;
 		}
-		entityIndex.updateDocument(document);
-		void refreshJavaDiagnostics(document);
-		if (entityIndex.didLastUpdateCauseStructuralChange()) {
-			scheduleWorkspaceJavaDiagnostics(document.uri.toString());
-		}
+		void indexJavaDocument(document);
 	}));
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
 		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
@@ -677,11 +666,7 @@ export function activate(context: vscode.ExtensionContext) {
 	}));
 	context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
 		if (document.languageId === 'java' && !isExcludedJavaDocument(document)) {
-			entityIndex.updateDocument(document, true);
-			void refreshJavaDiagnostics(document);
-			if (entityIndex.didLastUpdateCauseStructuralChange()) {
-				scheduleWorkspaceJavaDiagnostics(document.uri.toString());
-			}
+			void indexJavaDocument(document, true);
 		}
 	}));
 	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
@@ -698,8 +683,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	for (const document of vscode.workspace.textDocuments) {
 		if (!isExcludedJavaDocument(document)) {
-			entityIndex.updateDocument(document);
-			void refreshJavaDiagnostics(document);
+			void indexJavaDocument(document);
 		}
 	}
 
@@ -741,6 +725,8 @@ function parseMethodParameters(paramsText: string): { name: string; type: string
 	return parseJavaParameters(paramsText).map(({ name, type }) => ({ name, type }));
 }
 
-export function deactivate() {
-	void WorkspaceEntityIndex.getInstance().persistCache();
+export async function deactivate() {
+	const index = WorkspaceEntityIndex.getInstance();
+	await index.persistCache();
+	index.disposeWorker();
 }

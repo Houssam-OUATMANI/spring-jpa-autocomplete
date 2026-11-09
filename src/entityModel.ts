@@ -25,12 +25,12 @@ export interface EntityProperty {
 
 export type JpaRelation = 'OneToOne' | 'OneToMany' | 'ManyToOne' | 'ManyToMany' | 'ElementCollection' | 'Embedded' | 'EmbeddedId';
 
-export interface EntityInfo {
+export interface EntityInfo<TUri = vscode.Uri> {
 	readonly name: string;
 	readonly entityName?: string;
 	readonly tableName?: string;
 	readonly packageName?: string;
-	readonly uri: vscode.Uri;
+	readonly uri: TUri;
 	readonly isEntity?: boolean;
 	readonly hasEntityAnnotation?: boolean;
 	readonly isMongoDocument?: boolean;
@@ -43,11 +43,11 @@ export interface EntityInfo {
 	readonly location?: PropertyLocation;
 }
 
-export interface ProjectionTypeInfo {
+export interface ProjectionTypeInfo<TUri = vscode.Uri> {
 	readonly name: string;
 	readonly packageName?: string;
 	readonly kind: 'class' | 'interface' | 'record';
-	readonly uri: vscode.Uri;
+	readonly uri: TUri;
 	readonly properties?: readonly EntityProperty[];
 }
 
@@ -66,21 +66,25 @@ const REPOSITORY_INTERFACE = /\b(?:JpaRepository|CrudRepository|ListCrudReposito
 const PROJECTION_INTERFACE = /\binterface\s+\w+\b/;
 const PROJECTION_GETTER = /\b(?:get|is|has)[A-Z]\w*\s*\(/;
 
-export function parseEntityModel(text: string, uri: vscode.Uri): EntityInfo | undefined {
+export function parseEntityModel<TUri>(text: string, uri: TUri): EntityInfo<TUri> | undefined {
 	return parseEntityModels(text, uri)[0];
 }
 
-export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes?: ProjectionTypeInfo[]): EntityInfo[] {
+export function parseEntityModels<TUri>(
+	text: string,
+	uri: TUri,
+	projectionTypes?: ProjectionTypeInfo<TUri>[],
+): EntityInfo<TUri>[] {
 	const hasEntityAnnotation = ENTITY_MODEL_ANNOTATION.test(text);
 	const hasMongoDocument = MONGO_DOCUMENT_ANNOTATION.test(text);
 	const hasRecord = RECORD_DECLARATION_KEYWORD.test(text);
 	const hasProjection = PROJECTION_INTERFACE.test(text) && PROJECTION_GETTER.test(text) && !REPOSITORY_INTERFACE.test(text);
-	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection && !projectionTypes) {
+	if (!hasEntityAnnotation && !hasMongoDocument && !projectionTypes && !hasRecord && !hasProjection) {
 		return [];
 	}
-	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection && projectionTypes) {
+	if (!hasEntityAnnotation && !hasMongoDocument && projectionTypes) {
 		const packageName = text.match(PACKAGE_DECLARATION)?.[1];
-		for (const match of text.matchAll(/\b(class|interface)\s+([A-Za-z_$]\w*)/g)) {
+		for (const match of text.matchAll(/\b(record|class|interface)\s+([A-Za-z_$]\w*)/g)) {
 			let cachedProperties: EntityProperty[] | undefined;
 			const typeName = match[2];
 			const kind = match[1] as ProjectionTypeInfo['kind'];
@@ -103,6 +107,10 @@ export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes
 					return cachedProperties;
 				},
 			});
+		}
+		if (hasRecord || hasProjection) {
+			const legacyEntity = parseEntityModelLegacy(text, uri);
+			return legacyEntity ? [legacyEntity] : [];
 		}
 		return [];
 	}
@@ -131,7 +139,7 @@ export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes
 	return [];
 }
 
-function parseEntityModelLegacy(text: string, uri: vscode.Uri): EntityInfo | undefined {
+function parseEntityModelLegacy<TUri>(text: string, uri: TUri): EntityInfo<TUri> | undefined {
 	const maskedText = maskJavaSource(text);
 	const hasExplicitEntity = ENTITY_ANNOTATION.test(maskedText);
 	const isMongoDocument = /@(?:[\w$]+\.)*Document\b/.test(maskedText);

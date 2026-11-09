@@ -1,14 +1,11 @@
 import * as vscode from 'vscode';
+import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { EntityInfo, EntityProperty, parseEntityModels, ProjectionTypeInfo, PropertyLocation } from './entityModel';
-import { maskJavaSource } from './javaParsing';
+import { extractRepositoryEntityNames, extractRepositoryInfos, RepositoryInfo } from './repositoryIndex';
 
-export { EntityInfo, EntityProperty, ProjectionTypeInfo, PropertyLocation };
-
-export interface RepositoryInfo {
-	readonly uri: vscode.Uri;
-	readonly name: string;
-	readonly managedEntityNames: readonly string[];
-}
+export { EntityInfo, EntityProperty, ProjectionTypeInfo, PropertyLocation, RepositoryInfo };
+export { extractRepositoryEntityNames, extractRepositoryInfos } from './repositoryIndex';
 
 export interface StorageMemento {
 	get<T>(key: string): T | undefined;
@@ -16,7 +13,7 @@ export interface StorageMemento {
 }
 
 const CACHE_STORAGE_KEY = 'springJpa.workspaceEntityCache';
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 interface SerializedEntityInfo extends Omit<EntityInfo, 'uri'> {
 	uri: string;
@@ -40,6 +37,29 @@ interface WorkspaceCacheData {
 	files: Record<string, CachedFileEntry>;
 }
 
+interface WorkerSource {
+	readonly uri: string;
+	readonly revision: number;
+	readonly text: string;
+	readonly force?: boolean;
+}
+
+interface WorkerIndexedFile {
+	readonly uri: string;
+	readonly revision: number;
+	readonly fingerprint: string;
+	readonly unchanged?: boolean;
+	readonly entities?: readonly EntityInfo<string>[];
+	readonly projectionTypes?: readonly ProjectionTypeInfo<string>[];
+	readonly repositories?: readonly RepositoryInfo<string>[];
+}
+
+interface WorkerResponse {
+	readonly id: number;
+	readonly results?: readonly WorkerIndexedFile[];
+	readonly error?: string;
+}
+
 function serializeEntity(entity: EntityInfo): SerializedEntityInfo {
 	return {
 		...entity,
@@ -60,6 +80,7 @@ function serializeProjection(proj: ProjectionTypeInfo): SerializedProjectionType
 		packageName: proj.packageName,
 		kind: proj.kind,
 		uri: proj.uri.toString(),
+		properties: proj.properties ? [...proj.properties] : undefined,
 	};
 }
 
@@ -79,36 +100,17 @@ function rehydrateRepository(item: SerializedRepositoryInfo): RepositoryInfo {
 
 function rehydrateProjection(item: SerializedProjectionTypeInfo): ProjectionTypeInfo {
 	const uri = typeof item.uri === 'string' ? vscode.Uri.parse(item.uri) : item.uri;
-	let cachedProps: EntityProperty[] | undefined;
 	return {
 		name: item.name,
 		packageName: item.packageName,
 		kind: item.kind,
 		uri,
-		get properties() {
-			if (!cachedProps) {
-				try {
-					const fs = require('fs');
-					if (uri.scheme === 'file' && fs.existsSync(uri.fsPath)) {
-						const text = fs.readFileSync(uri.fsPath, 'utf8');
-						const dummy: ProjectionTypeInfo[] = [];
-						parseEntityModels(text, uri, dummy);
-						const found = dummy.find((d) => d.name === item.name);
-						cachedProps = found?.properties ? [...found.properties] : [];
-					} else {
-						cachedProps = [];
-					}
-				} catch {
-					cachedProps = [];
-				}
-			}
-			return cachedProps;
-		},
+		properties: item.properties ? [...item.properties] : [],
 	};
 }
 
-const REPOSITORY_ENTITY = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const PACKAGE_DECLARATION = /\bpackage\s+([\w.]+)\s*;/;
+const REPOSITORY_ENTITY = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|JpaSpecificationExecutor|Repository|RevisionRepository)\s*<\s*([A-Z]\w*)/g;
 const ALWAYS_EXCLUDED_JAVA_DIRECTORIES = new Set([
 	'node_modules', 'target', 'build', 'out', '.gradle', '.vscode-test',
 	'.git', '.idea', '.settings', '.vscode', 'bin', 'dist',
@@ -146,7 +148,15 @@ function haveEntitiesChanged(
 	for (let i = 0; i < current.length; i++) {
 		const prev = previous[i];
 		const curr = current[i];
-		if (prev.name !== curr.name || prev.entityName !== curr.entityName || prev.packageName !== curr.packageName || prev.isMongoDocument !== curr.isMongoDocument) {
+		if (prev.name !== curr.name || prev.entityName !== curr.entityName || prev.tableName !== curr.tableName
+			|| prev.packageName !== curr.packageName || prev.isEntity !== curr.isEntity
+			|| prev.hasEntityAnnotation !== curr.hasEntityAnnotation || prev.isMongoDocument !== curr.isMongoDocument
+			|| prev.isFinal !== curr.isFinal || prev.isProjection !== curr.isProjection
+			|| prev.superclassName !== curr.superclassName || prev.isMappedSuperclass !== curr.isMappedSuperclass
+			|| prev.isEmbeddable !== curr.isEmbeddable
+			|| prev.location?.line !== curr.location?.line
+			|| prev.location?.character !== curr.location?.character
+			|| prev.location?.length !== curr.location?.length) {
 			return true;
 		}
 		if (prev.properties.length !== curr.properties.length) {
@@ -155,7 +165,14 @@ function haveEntitiesChanged(
 		for (let j = 0; j < curr.properties.length; j++) {
 			const p1 = prev.properties[j];
 			const p2 = curr.properties[j];
-			if (p1.name !== p2.name || p1.type !== p2.type || p1.relation !== p2.relation || p1.targetEntity !== p2.targetEntity || p1.mongoFieldName !== p2.mongoFieldName) {
+			if (p1.name !== p2.name || p1.type !== p2.type || p1.isId !== p2.isId
+				|| p1.isTransient !== p2.isTransient || p1.relation !== p2.relation
+				|| p1.targetEntity !== p2.targetEntity || p1.mappedBy !== p2.mappedBy
+				|| p1.fetchType !== p2.fetchType || p1.columnName !== p2.columnName
+				|| p1.mongoFieldName !== p2.mongoFieldName || p1.isCollection !== p2.isCollection
+				|| p1.location?.line !== p2.location?.line
+				|| p1.location?.character !== p2.location?.character
+				|| p1.location?.length !== p2.location?.length) {
 				return true;
 			}
 		}
@@ -197,13 +214,25 @@ export class WorkspaceEntityIndex {
 	private projectionTypesByUri = new Map<string, readonly ProjectionTypeInfo[]>();
 	private repositoriesByUri = new Map<string, readonly RepositoryInfo[]>();
 	private entitiesByName = new Map<string, EntityInfo[]>();
+	private entityNameKeysByUri = new Map<string, ReadonlySet<string>>();
 	private sourceFingerprints = new Map<string, string>();
 	private fileStats = new Map<string, { mtime: number; size: number }>();
+	private allEntitiesCache: readonly EntityInfo[] | undefined;
+	private projectionTypesCache: readonly ProjectionTypeInfo[] | undefined;
 	private lastUpdateStructuralChange = true;
 	private isInitialized = false;
 	private initPromise: Promise<void> | undefined;
 	private storage: StorageMemento | undefined;
 	private persistTimer: ReturnType<typeof setTimeout> | undefined;
+	private worker: Worker | undefined;
+	private workerRequestId = 0;
+	private revisionCounter = 0;
+	private indexGeneration = 0;
+	private documentRevisions = new Map<string, number>();
+	private pendingWorkerRequests = new Map<number, {
+		resolve: (results: readonly WorkerIndexedFile[]) => void;
+		reject: (error: Error) => void;
+	}>();
 
 	public static getInstance(): WorkspaceEntityIndex {
 		if (!WorkspaceEntityIndex.instance) {
@@ -223,7 +252,15 @@ export class WorkspaceEntityIndex {
 		if (!this.initPromise) {
 			this.initPromise = this.scanWorkspace();
 		}
-		await this.initPromise;
+		const initialization = this.initPromise;
+		try {
+			await initialization;
+		} catch (error) {
+			if (this.initPromise === initialization) {
+				this.initPromise = undefined;
+			}
+			throw error;
+		}
 	}
 
 	public didLastUpdateCauseStructuralChange(): boolean {
@@ -231,12 +268,17 @@ export class WorkspaceEntityIndex {
 	}
 
 	public clear(clearDisk = false): void {
+		this.indexGeneration++;
 		this.entitiesByUri.clear();
 		this.projectionTypesByUri.clear();
 		this.repositoriesByUri.clear();
 		this.entitiesByName.clear();
+		this.entityNameKeysByUri.clear();
 		this.sourceFingerprints.clear();
 		this.fileStats.clear();
+		this.allEntitiesCache = undefined;
+		this.projectionTypesCache = undefined;
+		this.documentRevisions.clear();
 		this.lastUpdateStructuralChange = true;
 		this.isInitialized = false;
 		this.initPromise = undefined;
@@ -254,6 +296,7 @@ export class WorkspaceEntityIndex {
 			return;
 		}
 		const files: Record<string, CachedFileEntry> = {};
+		let serializedFileCount = 0;
 		for (const [uriKey, fingerprint] of this.sourceFingerprints) {
 			const entities = this.entitiesByUri.get(uriKey) ?? [];
 			const projectionTypes = this.projectionTypesByUri.get(uriKey) ?? [];
@@ -266,7 +309,11 @@ export class WorkspaceEntityIndex {
 				projectionTypes: projectionTypes.map(serializeProjection),
 				repositories: repositories.map(serializeRepository),
 			};
+			if (++serializedFileCount % 4 === 0) {
+				await new Promise<void>((resolve) => setTimeout(resolve, 0));
+			}
 		}
+
 		const cache: WorkspaceCacheData = {
 			version: CACHE_VERSION,
 			files,
@@ -276,6 +323,18 @@ export class WorkspaceEntityIndex {
 		} catch {
 			// ignore storage errors
 		}
+	}
+
+	public disposeWorker(): void {
+		const worker = this.worker;
+		this.worker = undefined;
+		if (worker) {
+			void worker.terminate();
+		}
+		for (const pending of this.pendingWorkerRequests.values()) {
+			pending.reject(new Error('Entity index worker was stopped.'));
+		}
+		this.pendingWorkerRequests.clear();
 	}
 
 	public schedulePersistCache(debounceMs = 1500): void {
@@ -294,6 +353,7 @@ export class WorkspaceEntityIndex {
 			return undefined;
 		}
 		const uriKey = document.uri.toString();
+		this.documentRevisions.set(uriKey, ++this.revisionCounter);
 		const text = document.getText();
 		const fingerprint = sourceFingerprint(text);
 		if (this.sourceFingerprints.get(uriKey) === fingerprint) {
@@ -323,17 +383,41 @@ export class WorkspaceEntityIndex {
 		const reposChanged = haveRepositoriesChanged(previousRepos, repos);
 		this.lastUpdateStructuralChange = entitiesChanged || reposChanged;
 
-		if (previousEntities || entities.length > 0) {
-			this.rebuildNameIndex();
+		if (entitiesChanged) {
+			this.updateNameIndex(uriKey, entities);
+			this.allEntitiesCache = undefined;
 		}
+		this.projectionTypesCache = undefined;
 		if (persist) {
 			this.schedulePersistCache();
 		}
 		return entities[0];
 	}
 
+	public async updateDocumentAsync(document: vscode.TextDocument, persist = false): Promise<boolean> {
+		if (document.languageId !== 'java' || isExcludedJavaUri(document.uri, this.includeTestSources())) {
+			return false;
+		}
+		const uriKey = document.uri.toString();
+		const revision = ++this.revisionCounter;
+		const generation = this.indexGeneration;
+		this.documentRevisions.set(uriKey, revision);
+		const text = document.getText();
+		const [result] = await this.parseInBackground([{
+			uri: uriKey,
+			text,
+			revision,
+			force: !this.sourceFingerprints.has(uriKey),
+		}]);
+		if (generation !== this.indexGeneration || this.documentRevisions.get(uriKey) !== revision || result.unchanged) {
+			return false;
+		}
+		return this.applyWorkerResult(result, document.uri, persist);
+	}
+
 	public removeUri(uri: vscode.Uri): void {
 		const uriKey = uri.toString();
+		this.documentRevisions.set(uriKey, ++this.revisionCounter);
 		const hadEntities = this.entitiesByUri.has(uriKey);
 		const hadRepos = this.repositoriesByUri.has(uriKey);
 		this.entitiesByUri.delete(uriKey);
@@ -342,7 +426,9 @@ export class WorkspaceEntityIndex {
 		this.sourceFingerprints.delete(uriKey);
 		this.fileStats.delete(uriKey);
 		this.lastUpdateStructuralChange = hadEntities || hadRepos;
-		this.rebuildNameIndex();
+		this.updateNameIndex(uriKey, []);
+		this.allEntitiesCache = undefined;
+		this.projectionTypesCache = undefined;
 		this.schedulePersistCache();
 	}
 
@@ -356,10 +442,16 @@ export class WorkspaceEntityIndex {
 	}
 
 	public getAllEntities(): readonly EntityInfo[] {
-		return [...this.entitiesByUri.values()].flat();
+		if (!this.allEntitiesCache) {
+			this.allEntitiesCache = [...this.entitiesByUri.values()].flat();
+		}
+		return this.allEntitiesCache;
 	}
 
 	public getAllProjectionTypes(): readonly ProjectionTypeInfo[] {
+		if (this.projectionTypesCache) {
+			return this.projectionTypesCache;
+		}
 		const uniqueTypes = new Map<string, ProjectionTypeInfo>();
 		for (const type of [...this.projectionTypesByUri.values()].flat()) {
 			const qualifiedName = type.packageName ? `${type.packageName}.${type.name}` : type.name;
@@ -367,7 +459,8 @@ export class WorkspaceEntityIndex {
 				uniqueTypes.set(qualifiedName, type);
 			}
 		}
-		return [...uniqueTypes.values()];
+		this.projectionTypesCache = [...uniqueTypes.values()];
+		return this.projectionTypesCache;
 	}
 
 	public getEntitiesForUri(uri: vscode.Uri): readonly EntityInfo[] {
@@ -435,7 +528,9 @@ export class WorkspaceEntityIndex {
 	}
 
 	private async scanWorkspace(): Promise<void> {
+		let completed = false;
 		try {
+			const generation = this.indexGeneration;
 			const includeTestSources = this.includeTestSources();
 			const excluded = includeTestSources
 				? '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist}/**'
@@ -452,16 +547,17 @@ export class WorkspaceEntityIndex {
 				cachedFiles = undefined;
 			}
 
-			let lastYield = Date.now();
-			const BATCH_SIZE = 32;
+			const BATCH_SIZE = 16;
 			for (let i = 0; i < files.length; i += BATCH_SIZE) {
 				const batch = files.slice(i, i + BATCH_SIZE);
+				const sources: WorkerSource[] = [];
 				await Promise.all(batch.map(async (uri) => {
 					try {
 						if (isExcludedJavaUri(uri, includeTestSources)) {
 							return;
 						}
 						const uriKey = uri.toString();
+						const revision = this.documentRevisions.get(uriKey) ?? 0;
 						const cached = cachedFiles?.[uriKey];
 
 						// FAST PATH: Check file stat (mtime + size) without reading file content from disk
@@ -477,67 +573,46 @@ export class WorkspaceEntityIndex {
 
 						if (cached && stat && cached.mtime !== undefined && cached.size !== undefined
 							&& cached.mtime === stat.mtime && cached.size === stat.size) {
-							this.sourceFingerprints.set(uriKey, cached.fingerprint);
-							this.fileStats.set(uriKey, stat);
-							if (cached.entities?.length > 0) {
-								this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
-							}
-							if (cached.projectionTypes?.length > 0) {
-								this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
-							}
-							if (cached.repositories?.length > 0) {
-								this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
-							}
+							this.applyCachedFile(uriKey, cached, stat, generation, revision);
 							return;
 						}
 
-						// SLOW PATH: Read file from disk
 						const contents = await vscode.workspace.fs.readFile(uri);
 						const text = Buffer.from(contents).toString('utf8');
-						const fingerprint = sourceFingerprint(text);
 
 						if (stat) {
 							this.fileStats.set(uriKey, stat);
 						}
 
-						if (cached && cached.fingerprint === fingerprint) {
-							this.sourceFingerprints.set(uriKey, fingerprint);
-							if (cached.entities?.length > 0) {
-								this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
-							}
-							if (cached.projectionTypes?.length > 0) {
-								this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
-							}
-							if (cached.repositories?.length > 0) {
-								this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
-							}
-							return;
-						}
-
-						this.sourceFingerprints.set(uriKey, fingerprint);
-						const projectionTypes: ProjectionTypeInfo[] = [];
-						const entities = parseEntityModels(text, uri, projectionTypes);
-						this.projectionTypesByUri.set(uriKey, projectionTypes);
-						if (entities.length > 0) {
-							this.entitiesByUri.set(uriKey, entities);
-						}
-						const repos = extractRepositoryInfos(text, uri);
-						if (repos.length > 0) {
-							this.repositoriesByUri.set(uriKey, repos);
+						if (generation === this.indexGeneration && revision === (this.documentRevisions.get(uriKey) ?? 0)) {
+							sources.push({
+								uri: uriKey,
+								text,
+								revision,
+								force: !this.sourceFingerprints.has(uriKey),
+							});
 						}
 					} catch {
 						// ignore
 					}
 				}));
-				if (Date.now() - lastYield >= 15) {
-					await new Promise<void>((resolve) => setTimeout(resolve, 0));
-					lastYield = Date.now();
+				if (generation === this.indexGeneration && sources.length > 0) {
+					const results = await this.parseInBackground(sources);
+					for (const result of results) {
+						if (result.revision !== (this.documentRevisions.get(result.uri) ?? 0)) {
+							continue;
+						}
+						this.applyWorkerResult(result, vscode.Uri.parse(result.uri));
+					}
 				}
+				await new Promise<void>((resolve) => setTimeout(resolve, 0));
 			}
+			completed = true;
 		} finally {
-			this.rebuildNameIndex();
-			this.isInitialized = true;
-			void this.persistCache();
+			this.isInitialized = completed;
+			if (completed) {
+				void this.persistCache();
+			}
 		}
 	}
 
@@ -547,59 +622,168 @@ export class WorkspaceEntityIndex {
 			: true;
 	}
 
-	private rebuildNameIndex(): void {
-		this.entitiesByName.clear();
-		for (const entities of this.entitiesByUri.values()) {
-			for (const entity of entities) {
-				const key = entity.name.toLowerCase();
-				this.entitiesByName.set(key, [...(this.entitiesByName.get(key) ?? []), entity]);
+	private updateNameIndex(uriKey: string, entities: readonly EntityInfo[]): void {
+		for (const key of this.entityNameKeysByUri.get(uriKey) ?? []) {
+			const remaining = (this.entitiesByName.get(key) ?? []).filter((entity) => entity.uri.toString() !== uriKey);
+			if (remaining.length > 0) {
+				this.entitiesByName.set(key, remaining);
+			} else {
+				this.entitiesByName.delete(key);
 			}
 		}
+		const keys = new Set<string>();
+		for (const entity of entities) {
+			const key = entity.name.toLowerCase();
+			keys.add(key);
+			this.entitiesByName.set(key, [...(this.entitiesByName.get(key) ?? []), entity]);
+		}
+		if (keys.size > 0) {
+			this.entityNameKeysByUri.set(uriKey, keys);
+		} else {
+			this.entityNameKeysByUri.delete(uriKey);
+		}
+	}
+
+	private applyCachedFile(
+		uriKey: string,
+		cached: CachedFileEntry,
+		stat: { mtime: number; size: number } | undefined,
+		generation: number,
+		revision: number,
+	): void {
+		if (generation !== this.indexGeneration || revision !== (this.documentRevisions.get(uriKey) ?? 0)) {
+			return;
+		}
+		this.sourceFingerprints.set(uriKey, cached.fingerprint);
+		if (stat) {
+			this.fileStats.set(uriKey, stat);
+		}
+		if (cached.entities?.length > 0) {
+			this.entitiesByUri.set(uriKey, cached.entities.map(rehydrateEntity));
+		} else {
+			this.entitiesByUri.delete(uriKey);
+		}
+		if (cached.projectionTypes?.length > 0) {
+			this.projectionTypesByUri.set(uriKey, cached.projectionTypes.map(rehydrateProjection));
+		} else {
+			this.projectionTypesByUri.delete(uriKey);
+		}
+		if (cached.repositories?.length > 0) {
+			this.repositoriesByUri.set(uriKey, cached.repositories.map(rehydrateRepository));
+		} else {
+			this.repositoriesByUri.delete(uriKey);
+		}
+		this.updateNameIndex(uriKey, this.entitiesByUri.get(uriKey) ?? []);
+		this.allEntitiesCache = undefined;
+		this.projectionTypesCache = undefined;
+	}
+
+	private async parseInBackground(sources: readonly WorkerSource[]): Promise<readonly WorkerIndexedFile[]> {
+		if (sources.length === 0) {
+			return [];
+		}
+		const worker = this.getWorker();
+		const id = ++this.workerRequestId;
+		worker.ref();
+		return new Promise<readonly WorkerIndexedFile[]>((resolve, reject) => {
+			this.pendingWorkerRequests.set(id, { resolve, reject });
+			try {
+				worker.postMessage({ id, sources });
+			} catch (error) {
+				this.pendingWorkerRequests.delete(id);
+				reject(error instanceof Error ? error : new Error(String(error)));
+			}
+		});
+	}
+
+	private getWorker(): Worker {
+		if (this.worker) {
+			return this.worker;
+		}
+		const worker = new Worker(join(__dirname, 'entityIndexWorker.js'));
+		worker.on('message', (response: WorkerResponse) => {
+			const pending = this.pendingWorkerRequests.get(response.id);
+			if (!pending) {
+				return;
+			}
+			this.pendingWorkerRequests.delete(response.id);
+			if (response.error) {
+				pending.reject(new Error(`Entity index worker failed: ${response.error}`));
+			} else {
+				pending.resolve(response.results ?? []);
+			}
+			if (this.pendingWorkerRequests.size === 0) {
+				worker.unref();
+			}
+		});
+		worker.on('error', (error) => this.failWorker(worker, error));
+		worker.on('exit', (code) => {
+			if (this.worker !== worker) {
+				return;
+			}
+			this.worker = undefined;
+			if (code !== 0 || this.pendingWorkerRequests.size > 0) {
+				this.rejectPendingWorkerRequests(new Error(`Entity index worker exited unexpectedly (code ${code}).`));
+			}
+		});
+		this.worker = worker;
+		worker.unref();
+		return worker;
+	}
+
+	private failWorker(worker: Worker, error: Error): void {
+		if (this.worker === worker) {
+			this.worker = undefined;
+		}
+		this.rejectPendingWorkerRequests(error);
+	}
+
+	private rejectPendingWorkerRequests(error: Error): void {
+		for (const pending of this.pendingWorkerRequests.values()) {
+			pending.reject(error);
+		}
+		this.pendingWorkerRequests.clear();
+	}
+
+	private applyWorkerResult(result: WorkerIndexedFile, uri: vscode.Uri, persist = false): boolean {
+		if (result.unchanged) {
+			return false;
+		}
+		const uriKey = uri.toString();
+		const previousEntities = this.entitiesByUri.get(uriKey);
+		const previousRepos = this.repositoriesByUri.get(uriKey);
+		const entities = (result.entities ?? []).map((entity) => ({ ...entity, uri }));
+		const projectionTypes = (result.projectionTypes ?? []).map((projection) => ({ ...projection, uri }));
+		const repositories = (result.repositories ?? []).map((repository) => ({ ...repository, uri }));
+		this.sourceFingerprints.set(uriKey, result.fingerprint);
+		this.projectionTypesByUri.set(uriKey, projectionTypes);
+		if (entities.length > 0) {
+			this.entitiesByUri.set(uriKey, entities);
+		} else {
+			this.entitiesByUri.delete(uriKey);
+		}
+		if (repositories.length > 0) {
+			this.repositoriesByUri.set(uriKey, repositories);
+		} else {
+			this.repositoriesByUri.delete(uriKey);
+		}
+		const entitiesChanged = haveEntitiesChanged(previousEntities, entities);
+		const reposChanged = haveRepositoriesChanged(previousRepos, repositories);
+		this.lastUpdateStructuralChange = entitiesChanged || reposChanged;
+		if (entitiesChanged) {
+			this.updateNameIndex(uriKey, entities);
+			this.allEntitiesCache = undefined;
+		}
+		this.projectionTypesCache = undefined;
+		if (persist) {
+			this.schedulePersistCache();
+		}
+		return entitiesChanged || reposChanged;
 	}
 }
 
 export function parseEntity(text: string, uri: vscode.Uri): EntityInfo | undefined {
 	return parseEntityModels(text, uri)[0];
-}
-
-export function extractRepositoryEntityNames(text: string): string[] {
-	return [...text.matchAll(REPOSITORY_ENTITY)].map((match) => match[1]);
-}
-
-const REPO_FILE_PATTERN = /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\b|@(Query|NativeQuery|Aggregation)\b/;
-
-export function extractRepositoryInfos(text: string, uri: vscode.Uri): RepositoryInfo[] {
-	if (!REPO_FILE_PATTERN.test(text)) {
-		return [];
-	}
-	const repos: RepositoryInfo[] = [];
-	const masked = maskJavaSource(text);
-	const repoRegex = /\binterface\s+([A-Za-z_$]\w*)\s*(?:<[^>]*>)?\s*extends\s+([^{]+)\{/g;
-	let match: RegExpExecArray | null;
-	while ((match = repoRegex.exec(masked)) !== null) {
-		const repoName = match[1];
-		const extendsClause = match[2];
-		const managedEntities = extractRepositoryEntityNames(extendsClause);
-		if (managedEntities.length > 0) {
-			repos.push({
-				uri,
-				name: repoName,
-				managedEntityNames: [...new Set(managedEntities)],
-			});
-		}
-	}
-	if (repos.length === 0 && (/@(?:Query|NativeQuery|Aggregation)\b/.test(masked) || /\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|ReactiveCrudRepository|CrudRepository|ListCrudRepository|PagingAndSortingRepository|Repository|RevisionRepository)\b/.test(masked))) {
-		const typeMatch = masked.match(/\b(?:interface|class)\s+([A-Za-z_$]\w*)/);
-		const managedEntities = extractRepositoryEntityNames(text);
-		if (typeMatch || managedEntities.length > 0) {
-			repos.push({
-				uri,
-				name: typeMatch ? typeMatch[1] : 'SpringRepository',
-				managedEntityNames: [...new Set(managedEntities)],
-			});
-		}
-	}
-	return repos;
 }
 
 let lastRepoText: string | undefined;

@@ -2311,6 +2311,9 @@ public class CachedUser {
 	private Long id;
 	private String username;
 }
+interface CachedUserView {
+	String getUsername();
+}
 `;
 		const userDoc = {
 			uri: userUri,
@@ -2346,6 +2349,8 @@ public class CachedUser {
 		assert.ok(loadedEntity, 'Entity must be rehydrated from cache');
 		assert.strictEqual(loadedEntity?.name, 'CachedUser');
 		assert.ok(loadedEntity?.properties.some((p) => p.name === 'username'));
+		const cachedProjection = index.getAllProjectionTypes().find((projection) => projection.name === 'CachedUserView');
+		assert.ok(cachedProjection?.properties?.some((property) => property.name === 'username'));
 
 		// Cleanup
 		index.clear(true);
@@ -2587,6 +2592,34 @@ public class StatUser {
 
 		index.updateDocument(docV3);
 		assert.strictEqual(index.didLastUpdateCauseStructuralChange(), true, 'Adding property should be structural');
+	});
+
+	test('WorkspaceEntityIndex parses document updates on its worker thread', async () => {
+		const index = new WorkspaceEntityIndex();
+		const uri = vscode.Uri.parse('file:///WorkerIndexed.java');
+		const document = {
+			uri,
+			languageId: 'java',
+			getText: () => '@Entity class WorkerIndexed { @Id Long id; String name; }',
+		} as vscode.TextDocument;
+		let indexingFinished = false;
+		try {
+			const indexing = index.updateDocumentAsync(document).then((changed) => {
+				indexingFinished = true;
+				return changed;
+			});
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			assert.strictEqual(indexingFinished, false, 'Parsing must not run synchronously on the extension thread');
+			assert.strictEqual(await indexing, true);
+			assert.strictEqual(index.getEntity('WorkerIndexed')?.uri.toString(), uri.toString());
+			assert.strictEqual(await index.updateDocumentAsync(document), false, 'Unchanged sources should reuse the worker result');
+			index.removeUri(uri);
+			assert.strictEqual(await index.updateDocumentAsync(document), true, 'Removed sources must be indexed again');
+			index.clear();
+			assert.strictEqual(await index.updateDocumentAsync(document), true, 'Cleared indexes must not reuse stale worker results');
+		} finally {
+			index.disposeWorker();
+		}
 	});
 
 	test('parseEntityModels fast-path extracts projectionTypes for non-entity classes without AST', () => {

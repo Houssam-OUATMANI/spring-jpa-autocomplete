@@ -17,17 +17,21 @@ type AstElement = CstNode | IToken;
 
 const { parse } = require('java-parser') as { parse: (source: string) => CstNode };
 
-export function parseEntityModelAst(text: string, uri: EntityInfo['uri']): EntityInfo | undefined {
+export function parseEntityModelAst<TUri>(text: string, uri: TUri): EntityInfo<TUri> | undefined {
 	return parseEntityModelsAst(text, uri)[0];
 }
 
-export function parseEntityModelsAst(text: string, uri: EntityInfo['uri'], projectionTypes?: ProjectionTypeInfo[]): EntityInfo[] {
+export function parseEntityModelsAst<TUri>(
+	text: string,
+	uri: TUri,
+	projectionTypes?: ProjectionTypeInfo<TUri>[],
+): EntityInfo<TUri>[] {
 	const root = parse(text);
 	const unit = childNodes(root, 'ordinaryCompilationUnit')[0];
 	if (!unit) {
 		return [];
 	}
-	const entities: EntityInfo[] = [];
+	const entities: EntityInfo<TUri>[] = [];
 	const packageDeclaration = childNodes(unit, 'packageDeclaration')[0];
 	const packageIdentifiers = childTokens(packageDeclaration, 'Identifier');
 	const packageName = packageIdentifiers.length > 0
