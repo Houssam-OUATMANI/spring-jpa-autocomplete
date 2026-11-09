@@ -48,6 +48,7 @@ export interface ProjectionTypeInfo {
 	readonly packageName?: string;
 	readonly kind: 'class' | 'interface' | 'record';
 	readonly uri: vscode.Uri;
+	readonly properties?: readonly EntityProperty[];
 }
 
 const ENTITY_ANNOTATION = /@Entity\b(?:\s*\([^)]*\))?/;
@@ -74,18 +75,24 @@ export function parseEntityModels(text: string, uri: vscode.Uri, projectionTypes
 	const hasMongoDocument = MONGO_DOCUMENT_ANNOTATION.test(text);
 	const hasRecord = RECORD_DECLARATION_KEYWORD.test(text);
 	const hasProjection = PROJECTION_INTERFACE.test(text) && PROJECTION_GETTER.test(text) && !REPOSITORY_INTERFACE.test(text);
-	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection) {
-		if (projectionTypes) {
-			const maskedText = maskJavaSource(text);
-			const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
-			for (const match of maskedText.matchAll(/\b(record|class|interface)\s+([A-Za-z_$]\w*)/g)) {
-				projectionTypes.push({
-					name: match[2],
-					packageName,
-					kind: match[1] as ProjectionTypeInfo['kind'],
-					uri,
-				});
-			}
+	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection && !projectionTypes) {
+		return [];
+	}
+	if (!hasEntityAnnotation && !hasMongoDocument && !hasRecord && !hasProjection && projectionTypes) {
+		const maskedText = maskJavaSource(text);
+		const packageName = maskedText.match(PACKAGE_DECLARATION)?.[1];
+		for (const match of maskedText.matchAll(/\b(class|interface)\s+([A-Za-z_$]\w*)/g)) {
+			const bodyStart = maskedText.indexOf('{', (match.index ?? 0) + match[0].length);
+			const bodyEnd = bodyStart < 0 ? -1 : findMatchingBrace(maskedText, bodyStart);
+			projectionTypes.push({
+				name: match[2],
+				packageName,
+				kind: match[1] as ProjectionTypeInfo['kind'],
+				uri,
+				properties: bodyStart >= 0 && bodyEnd >= 0
+					? extractClassProperties(text, maskedText, bodyStart, false, bodyEnd)
+					: [],
+			});
 		}
 		return [];
 	}

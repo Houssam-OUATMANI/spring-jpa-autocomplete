@@ -1,5 +1,5 @@
 import { createEntityLookup, resolveEntityHierarchy } from '../entityDiscovery';
-import { EntityInfo, EntityProperty } from '../entityModel';
+import { EntityInfo, EntityProperty, ProjectionTypeInfo } from '../entityModel';
 import { MethodSignatureInfo } from './queryValidator';
 import { parseDerivedMethodName, ParsedPredicate } from './queryParser';
 
@@ -14,6 +14,7 @@ export function convertDerivedQueryToMongoQuery(
 	entityName: string,
 	entities: readonly EntityInfo[] = [],
 	repositoryText?: string,
+	embeddedTypes: readonly ProjectionTypeInfo[] = [],
 ): ConvertedMongoQueryResult | undefined {
 	const parsed = parseDerivedMethodName(signature.methodName);
 	if (!parsed
@@ -31,7 +32,7 @@ export function convertDerivedQueryToMongoQuery(
 		if (predicate.ignoreCase && !isRegexPredicate(predicate.operator)) {
 			return undefined;
 		}
-		const fieldPath = resolveMongoPropertyPath(entityName, predicate.propertyName, entities, repositoryText);
+		const fieldPath = resolveMongoPropertyPath(entityName, predicate.propertyName, entities, repositoryText, embeddedTypes);
 		if (!fieldPath) {
 			return undefined;
 		}
@@ -58,7 +59,7 @@ export function convertDerivedQueryToMongoQuery(
 
 	if (parsed.orderBy.length > 0) {
 		const sortEntries = parsed.orderBy.map((order) => {
-			const path = resolveMongoPropertyPath(entityName, order.propertyName, entities, repositoryText);
+			const path = resolveMongoPropertyPath(entityName, order.propertyName, entities, repositoryText, embeddedTypes);
 			return path ? `'${path}': ${order.direction === 'Asc' ? 1 : -1}` : undefined;
 		});
 		if (sortEntries.some((entry) => entry === undefined)) {
@@ -172,9 +173,16 @@ function resolveMongoPropertyPath(
 	derivedPropertyName: string,
 	entities: readonly EntityInfo[],
 	repositoryText?: string,
+	embeddedTypes: readonly ProjectionTypeInfo[] = [],
 ): string | undefined {
 	const packageName = repositoryText?.match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
-	const lookup = createEntityLookup(entities, packageName, repositoryText);
+	const embeddedEntities: EntityInfo[] = embeddedTypes.flatMap((type) => type.properties ? [{
+		name: type.name,
+		packageName: type.packageName,
+		uri: type.uri,
+		properties: type.properties,
+	}] : []);
+	const lookup = createEntityLookup([...entities, ...embeddedEntities], packageName, repositoryText);
 	let currentEntity = lookup.get(entityName.toLowerCase());
 	const javaPath = currentEntity
 		? resolveJavaPropertyPath(currentEntity, derivedPropertyName, lookup)

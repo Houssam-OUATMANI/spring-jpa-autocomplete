@@ -113,6 +113,30 @@ suite('Extension Test Suite', () => {
 		);
 	});
 
+	test('converts derived paths through embedded Mongo collection elements', () => {
+		const post = parseEntityModelAst(
+			'package example; @Document class Post { List<Tag> tags; }',
+			vscode.Uri.parse('file:///example/Post.java'),
+		)!;
+		const embeddedTypes: ProjectionTypeInfo[] = [];
+		assert.deepStrictEqual(
+			parseEntityModels('package example; class Tag { String name; }', vscode.Uri.parse('file:///example/Tag.java'), embeddedTypes),
+			[],
+		);
+		assert.deepStrictEqual(embeddedTypes[0].properties?.map((property) => property.name), ['name']);
+
+		const result = convertDerivedQueryToMongoQuery({
+			rawText: 'List<Post> findByTagsName(String tagsName);',
+			methodName: 'findByTagsName',
+			returnType: 'List<Post>',
+			entityName: 'Post',
+			parameters: [{ name: 'tagsName', type: 'String' }],
+			startOffset: 0,
+			endOffset: 43,
+		}, 'Post', [post], 'package example;', embeddedTypes);
+		assert.strictEqual(result?.mongoQuery, "{ 'tags.name': ?0 }");
+	});
+
 	test('offers the MongoDB @Query refactoring for derived Mongo repository methods', () => {
 		const source = [
 			'package example;',

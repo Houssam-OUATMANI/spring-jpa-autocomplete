@@ -16,7 +16,7 @@ export interface StorageMemento {
 }
 
 const CACHE_STORAGE_KEY = 'springJpa.workspaceEntityCache';
-const CACHE_VERSION = 2;
+const CACHE_VERSION = 3;
 
 interface SerializedEntityInfo extends Omit<EntityInfo, 'uri'> {
 	uri: string;

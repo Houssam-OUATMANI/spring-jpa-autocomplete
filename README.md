@@ -107,7 +107,7 @@ interface UserRepository extends MongoRepository<UserDocument, String> {
 
 Mongo document fields power derived-query completion. Inside Mongo `@Query` and `@Aggregation` strings, completion suggests mapped field paths, logical operators, and operators such as `$regex`, `$options`, `$gte`, `$in`, and `$elemMatch`; entries include syntax and examples. Hover an operator for its MongoDB documentation. Diagnostics check unknown fields and operators, offer typo fixes, and catch unmatched quotes or braces. `@Field` names and nested paths are respected.
 
-The **Convert to @Query (MongoDB)** refactoring converts supported derived repository methods into Mongo JSON queries with positional parameters, mapped `@Field` names, regex flags for case-insensitive substring matching, sort metadata, and `count` / `exists` / `delete` options. It is not offered when modifiers or predicates cannot be represented without changing the method's behavior.
+The **Convert to @Query (MongoDB)** refactoring converts supported derived repository methods into Mongo JSON queries with positional parameters, mapped `@Field` names, regex flags for case-insensitive substring matching, sort metadata, and `count` / `exists` / `delete` options. It resolves paths through embedded POJOs and collection elements too, so `List<Post> findByTagsName(String tagsName)` can target `tags.name`. It is not offered when modifiers or predicates cannot be represented without changing the method's behavior.
 
 `MongoTemplate` and `ReactiveMongoTemplate` Criteria fields are completed and validated when the method's template operation identifies its document type. Mongo query diagnostics can be configured independently with `springJpa.diagnostics.mongoQueries`.
 

@@ -64,13 +64,6 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri'], proje
 		if (!identifier) {
 			continue;
 		}
-		projectionTypes?.push({
-			name: identifier.image,
-			packageName,
-			kind: record ? 'record' : normalInterface ? 'interface' : 'class',
-			uri,
-		});
-
 		const properties = new Map<string, EntityProperty>();
 		if (record) {
 			for (const component of descendants(record, 'recordComponent')) {
@@ -119,6 +112,13 @@ export function parseEntityModelsAst(text: string, uri: EntityInfo['uri'], proje
 		const isMappedSuperclass = annotations.has('MappedSuperclass');
 		const isEmbeddable = annotations.has('Embeddable');
 		const isProjection = Boolean(normalInterface && properties.size > 0);
+		projectionTypes?.push({
+			name: identifier.image,
+			packageName,
+			kind: record ? 'record' : normalInterface ? 'interface' : 'class',
+			uri,
+			properties: [...properties.values()],
+		});
 		const hasJpaMarkers = annotations.has('Table') || [...properties.values()].some((p) => p.isId || p.relation !== undefined || p.columnName !== undefined);
 		const isEntity = !isMongoDocument && (hasExplicitEntity || (!isMappedSuperclass && !isEmbeddable && !record && !isProjection && hasJpaMarkers));
 		if (!isEntity && !isMappedSuperclass && !isEmbeddable && !record && !isProjection && !isMongoDocument) {

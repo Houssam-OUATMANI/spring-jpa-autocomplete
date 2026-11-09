@@ -304,7 +304,13 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 						endOffset: methodMatch[0].length,
 					};
 					const converted = isMongoRepository
-						? convertDerivedQueryToMongoQuery(signature, repoEntityName, getIndexedEntities(document), docText)
+						? convertDerivedQueryToMongoQuery(
+							signature,
+							repoEntityName,
+							getIndexedEntities(document),
+							docText,
+							WorkspaceEntityIndex.getInstance().getAllProjectionTypes(),
+						)
 						: convertDerivedQueryToJpql(signature, repoEntityName, getIndexedEntities(document));
 
 					if (converted) {
