@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, getIndexedEntities, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { clearModuleCache, isSameModule, isSameOrSharedModule, registerModuleRoot, resolveModuleInfo } from '../workspace/moduleResolver';
 import { parseEntityModel, parseEntityModels, ProjectionTypeInfo } from '../entityModel';
 import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
@@ -2669,5 +2670,127 @@ public class CustomService {
 		const elapsed = Date.now() - start;
 		assert.ok(elapsed < 200, `Parsing should be instantaneous (<200ms), took ${elapsed}ms`);
 		assert.ok(Array.isArray(diags));
+	});
+
+	test('ModuleResolver identifies Maven/Gradle microservices and shared modules from URI paths', () => {
+		clearModuleCache();
+		const authUserUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/User.java');
+		const authRepoUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/UserRepository.java');
+		const orderUserUri = vscode.Uri.parse('file:///workspace/order-service/src/main/java/com/example/order/User.java');
+		const commonBaseUri = vscode.Uri.parse('file:///workspace/common-lib/src/main/java/com/example/common/BaseEntity.java');
+
+		const authMod = resolveModuleInfo(authUserUri);
+		assert.strictEqual(authMod.name, 'auth-service');
+		assert.strictEqual(authMod.isShared, false);
+
+		const orderMod = resolveModuleInfo(orderUserUri);
+		assert.strictEqual(orderMod.name, 'order-service');
+		assert.strictEqual(orderMod.isShared, false);
+
+		const commonMod = resolveModuleInfo(commonBaseUri);
+		assert.strictEqual(commonMod.name, 'common-lib');
+		assert.strictEqual(commonMod.isShared, true);
+
+		assert.strictEqual(isSameModule(authUserUri, authRepoUri), true);
+		assert.strictEqual(isSameModule(authUserUri, orderUserUri), false);
+		assert.strictEqual(isSameOrSharedModule(commonBaseUri, authUserUri), true);
+		assert.strictEqual(isSameOrSharedModule(orderUserUri, authUserUri), false);
+	});
+
+	test('WorkspaceEntityIndex isolates microservice entities with identical names and inherits shared modules', () => {
+		clearModuleCache();
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(false);
+
+		// Microservice 1: auth-service has User (id, email)
+		const authUserUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/User.java');
+		const authUserDoc = {
+			uri: authUserUri,
+			languageId: 'java',
+			getText: () => 'package com.example.auth; @Entity public class User { @Id private Long id; private String email; }',
+		} as any;
+		index.updateDocument(authUserDoc);
+
+		// Microservice 2: order-service has User (id, customerName)
+		const orderUserUri = vscode.Uri.parse('file:///workspace/order-service/src/main/java/com/example/order/User.java');
+		const orderUserDoc = {
+			uri: orderUserUri,
+			languageId: 'java',
+			getText: () => 'package com.example.order; @Entity public class User { @Id private Long id; private String customerName; }',
+		} as any;
+		index.updateDocument(orderUserDoc);
+
+		// Shared lib: common-lib has BaseEntity
+		const commonBaseUri = vscode.Uri.parse('file:///workspace/common-lib/src/main/java/com/example/common/BaseEntity.java');
+		const commonBaseDoc = {
+			uri: commonBaseUri,
+			languageId: 'java',
+			getText: () => 'package com.example.common; @MappedSuperclass public class BaseEntity { @Id private Long id; private String createdBy; }',
+		} as any;
+		index.updateDocument(commonBaseDoc);
+
+		// Document in auth-service querying entities
+		const authRepoUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/UserRepository.java');
+		const authRepoDoc = { uri: authRepoUri, languageId: 'java', getText: () => 'package com.example.auth; public interface UserRepository extends JpaRepository<User, Long> {}' } as any;
+
+		const authEntities = index.getEntitiesForDocument(authRepoDoc);
+		const userEntityInAuth = authEntities.find((e) => e.name === 'User');
+		assert.ok(userEntityInAuth, 'User entity should be found in auth-service');
+		assert.strictEqual(userEntityInAuth?.uri.toString(), authUserUri.toString());
+		assert.ok(userEntityInAuth?.properties.some((p) => p.name === 'email'), 'Should resolve auth-service User with email');
+		assert.strictEqual(userEntityInAuth?.properties.some((p) => p.name === 'customerName'), false, 'Should not leak order-service customerName');
+
+		// BaseEntity from common-lib should be visible in auth-service
+		const baseEntityInAuth = authEntities.find((e) => e.name === 'BaseEntity');
+		assert.ok(baseEntityInAuth, 'BaseEntity from common-lib should be accessible in auth-service');
+
+		// Document in order-service querying entities
+		const orderRepoUri = vscode.Uri.parse('file:///workspace/order-service/src/main/java/com/example/order/OrderRepository.java');
+		const orderRepoDoc = { uri: orderRepoUri, languageId: 'java', getText: () => 'package com.example.order; public interface OrderRepository extends JpaRepository<User, Long> {}' } as any;
+
+		const orderEntities = index.getEntitiesForDocument(orderRepoDoc);
+		const userEntityInOrder = orderEntities.find((e) => e.name === 'User');
+		assert.ok(userEntityInOrder, 'User entity should be found in order-service');
+		assert.strictEqual(userEntityInOrder?.uri.toString(), orderUserUri.toString());
+		assert.ok(userEntityInOrder?.properties.some((p) => p.name === 'customerName'), 'Should resolve order-service User with customerName');
+		assert.strictEqual(userEntityInOrder?.properties.some((p) => p.name === 'email'), false, 'Should not leak auth-service email');
+
+		index.clear(false);
+	});
+
+	test('getRepositoriesForEntity scopes CodeLens and repository links to the calling microservice', () => {
+		clearModuleCache();
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(false);
+
+		// auth-service UserRepository
+		const authRepoUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/UserRepository.java');
+		index.updateDocument({
+			uri: authRepoUri,
+			languageId: 'java',
+			getText: () => 'package com.example.auth; public interface UserRepository extends JpaRepository<User, Long> {}',
+		} as any);
+
+		// order-service UserRepository
+		const orderRepoUri = vscode.Uri.parse('file:///workspace/order-service/src/main/java/com/example/order/UserRepository.java');
+		index.updateDocument({
+			uri: orderRepoUri,
+			languageId: 'java',
+			getText: () => 'package com.example.order; public interface UserRepository extends JpaRepository<User, Long> {}',
+		} as any);
+
+		// CodeLens in auth-service User.java
+		const authUserUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/User.java');
+		const authRepos = index.getRepositoriesForEntity('User', authUserUri);
+		assert.strictEqual(authRepos.length, 1);
+		assert.strictEqual(authRepos[0].uri.toString(), authRepoUri.toString());
+
+		// CodeLens in order-service User.java
+		const orderUserUri = vscode.Uri.parse('file:///workspace/order-service/src/main/java/com/example/order/User.java');
+		const orderRepos = index.getRepositoriesForEntity('User', orderUserUri);
+		assert.strictEqual(orderRepos.length, 1);
+		assert.strictEqual(orderRepos[0].uri.toString(), orderRepoUri.toString());
+
+		index.clear(false);
 	});
 });

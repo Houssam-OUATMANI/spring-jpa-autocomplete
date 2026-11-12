@@ -312,7 +312,7 @@ export class SpringJpaCodeActionProvider implements vscode.CodeActionProvider {
 							repoEntityName,
 							getIndexedEntities(document),
 							docText,
-							WorkspaceEntityIndex.getInstance().getAllProjectionTypes(),
+							WorkspaceEntityIndex.getInstance().getProjectionTypesForDocument(document),
 						)
 						: convertDerivedQueryToJpql(signature, repoEntityName, getIndexedEntities(document));
 

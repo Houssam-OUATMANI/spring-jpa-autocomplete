@@ -295,7 +295,7 @@ export function activate(context: vscode.ExtensionContext) {
 					const hasNativeQuery = /@NativeQuery\b|nativeQuery\s*=\s*true/.test(docText);
 					const sqlDialect = hasNativeQuery ? await resolveSqlDialect(document, false) : 'generic';
 					const jpaEntities = entities.filter((entity) => !entity.isMongoDocument);
-					const jpqlItems = createJpqlCompletions(document, position, jpaEntities, sqlDialect, () => entityIndex.getAllProjectionTypes());
+					const jpqlItems = createJpqlCompletions(document, position, jpaEntities, sqlDialect, () => entityIndex.getProjectionTypesForDocument(document));
 					if (jpqlItems && jpqlItems.length > 0) {
 						return jpqlItems;
 					}
@@ -587,7 +587,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		if (hasEntities) {
 			const currentEntities = entityIndex.getEntitiesForUri(document.uri).filter((entity) => !entity.isMongoDocument);
-			const allEntities = entityIndex.getAllEntities().filter((entity) => !entity.isMongoDocument);
+			const allEntities = entityIndex.getEntitiesForDocument(document).filter((entity) => !entity.isMongoDocument);
 			const entityDiags = validateJpaEntities(currentEntities, allEntities, docText);
 			for (const diag of entityDiags) {
 				if (!shouldDisplayDiagnostic(derivedMode, diag.severity)) {

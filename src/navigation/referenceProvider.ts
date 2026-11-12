@@ -3,6 +3,7 @@ import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDi
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 import { findMongoFieldAccesses, findMongoTemplateFieldAccesses, getMongoRepositoryRanges, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
+import { isSameOrSharedModule } from '../workspace/moduleResolver';
 
 export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 	public async provideReferences(
@@ -13,7 +14,7 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 	): Promise<vscode.Location[]> {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const allEntities = index.getAllEntities();
+		const allEntities = index.getEntitiesForDocument(document);
 
 		const wordRange = document.getWordRangeAtPosition(position);
 		if (!wordRange) {
@@ -42,7 +43,7 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 		// Search across candidate repository and open documents in workspace
 		const candidateDocs = await index.getCandidateDocuments();
 		for (const doc of candidateDocs) {
-			if (doc.languageId !== 'java') {
+			if (doc.languageId !== 'java' || (doc.uri.toString() !== document.uri.toString() && !isSameOrSharedModule(doc.uri, document.uri))) {
 				continue;
 			}
 			const text = doc.getText();

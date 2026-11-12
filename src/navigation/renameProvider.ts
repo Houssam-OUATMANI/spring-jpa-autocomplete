@@ -3,6 +3,7 @@ import { extractRepositoryEntityNameAt, WorkspaceEntityIndex } from '../entityDi
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 import { findMongoFieldAccesses, findMongoTemplateFieldAccesses, getMongoRepositoryRanges, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
+import { isSameOrSharedModule } from '../workspace/moduleResolver';
 
 export class SpringJpaRenameProvider implements vscode.RenameProvider {
 	public prepareRename(
@@ -39,7 +40,7 @@ export class SpringJpaRenameProvider implements vscode.RenameProvider {
 		const oldName = document.getText(wordRange);
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const allEntities = index.getAllEntities();
+		const allEntities = index.getEntitiesForDocument(document);
 		const currentEntities = index.getEntitiesForUri(document.uri);
 		const entity = currentEntities.find((e) =>
 			e.properties.some((p) => p.name.toLowerCase() === oldName.toLowerCase()),
@@ -58,7 +59,7 @@ export class SpringJpaRenameProvider implements vscode.RenameProvider {
 		const candidateDocs = await index.getCandidateDocuments();
 
 		for (const doc of candidateDocs) {
-			if (doc.languageId !== 'java') {
+			if (doc.languageId !== 'java' || (doc.uri.toString() !== document.uri.toString() && !isSameOrSharedModule(doc.uri, document.uri))) {
 				continue;
 			}
 			const text = doc.getText();

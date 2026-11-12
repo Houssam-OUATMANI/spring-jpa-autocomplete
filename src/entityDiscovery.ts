@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { EntityInfo, EntityProperty, parseEntityModels, ProjectionTypeInfo, PropertyLocation } from './entityModel';
 import { extractRepositoryEntityNames, extractRepositoryInfos, RepositoryInfo } from './repositoryIndex';
+import { isSameModule, isSameOrSharedModule } from './workspace/moduleResolver';
 
 export { EntityInfo, EntityProperty, ProjectionTypeInfo, PropertyLocation, RepositoryInfo };
 export { extractRepositoryEntityNames, extractRepositoryInfos } from './repositoryIndex';
@@ -467,7 +468,101 @@ export class WorkspaceEntityIndex {
 		return this.entitiesByUri.get(uri.toString()) ?? [];
 	}
 
-	public getRepositoriesForEntity(entityName: string): readonly RepositoryInfo[] {
+	public getEntitiesForDocument(documentOrUri: vscode.TextDocument | vscode.Uri): readonly EntityInfo[] {
+		const contextUri = 'uri' in documentOrUri ? documentOrUri.uri : documentOrUri;
+		const currentEntities = this.getEntitiesForUri(contextUri);
+		const all = this.getAllEntities();
+		if (all.length === 0) {
+			return currentEntities;
+		}
+
+		// Rank entities by module proximity to contextUri:
+		// Priority 4: Exact same file
+		// Priority 3: Same module
+		// Priority 2: Shared / common module
+		// Priority 1: Unrelated module (only kept if name doesn't collide with higher priority)
+		const highestPriorityByName = new Map<string, number>();
+		const scoredEntities: { entity: EntityInfo; priority: number }[] = [];
+
+		for (const entity of all) {
+			const isCurrentFile = entity.uri.toString() === contextUri.toString();
+			const sameMod = !isCurrentFile && isSameModule(entity.uri, contextUri);
+			const sharedMod = !isCurrentFile && !sameMod && isSameOrSharedModule(entity.uri, contextUri);
+			const priority = isCurrentFile ? 4 : sameMod ? 3 : sharedMod ? 2 : 1;
+
+			const nameKey = entity.name.toLowerCase();
+			const currentHighest = highestPriorityByName.get(nameKey) ?? 0;
+			if (priority > currentHighest) {
+				highestPriorityByName.set(nameKey, priority);
+			}
+			scoredEntities.push({ entity, priority });
+		}
+
+		scoredEntities.sort((a, b) => b.priority - a.priority);
+		const filtered: EntityInfo[] = [];
+		const seenUriEntity = new Set<string>();
+
+		for (const { entity, priority } of scoredEntities) {
+			const nameKey = entity.name.toLowerCase();
+			const highest = highestPriorityByName.get(nameKey) ?? 1;
+			if (priority < highest && priority === 1) {
+				continue;
+			}
+			const key = `${entity.uri.toString()}:${entity.name}`;
+			if (!seenUriEntity.has(key)) {
+				seenUriEntity.add(key);
+				filtered.push(entity);
+			}
+		}
+
+		return filtered;
+	}
+
+	public getProjectionTypesForDocument(documentOrUri: vscode.TextDocument | vscode.Uri): readonly ProjectionTypeInfo[] {
+		const contextUri = 'uri' in documentOrUri ? documentOrUri.uri : documentOrUri;
+		const all = this.getAllProjectionTypes();
+		if (all.length === 0) {
+			return all;
+		}
+
+		const highestPriorityByName = new Map<string, number>();
+		const scoredTypes: { type: ProjectionTypeInfo; priority: number }[] = [];
+
+		for (const type of all) {
+			const isCurrentFile = type.uri ? type.uri.toString() === contextUri.toString() : false;
+			const sameMod = type.uri ? !isCurrentFile && isSameModule(type.uri, contextUri) : true;
+			const sharedMod = type.uri ? !isCurrentFile && !sameMod && isSameOrSharedModule(type.uri, contextUri) : false;
+			const priority = isCurrentFile ? 4 : sameMod ? 3 : sharedMod ? 2 : 1;
+
+			const nameKey = type.name.toLowerCase();
+			const currentHighest = highestPriorityByName.get(nameKey) ?? 0;
+			if (priority > currentHighest) {
+				highestPriorityByName.set(nameKey, priority);
+			}
+			scoredTypes.push({ type, priority });
+		}
+
+		scoredTypes.sort((a, b) => b.priority - a.priority);
+		const filtered: ProjectionTypeInfo[] = [];
+		const seenNames = new Set<string>();
+
+		for (const { type, priority } of scoredTypes) {
+			const nameKey = type.name.toLowerCase();
+			const highest = highestPriorityByName.get(nameKey) ?? 1;
+			if (priority < highest && priority === 1) {
+				continue;
+			}
+			const qualifiedName = type.packageName ? `${type.packageName}.${type.name}` : type.name;
+			if (!seenNames.has(qualifiedName)) {
+				seenNames.add(qualifiedName);
+				filtered.push(type);
+			}
+		}
+
+		return filtered;
+	}
+
+	public getRepositoriesForEntity(entityName: string, contextUri?: vscode.Uri): readonly RepositoryInfo[] {
 		const result: RepositoryInfo[] = [];
 		const search = entityName.toLowerCase();
 		for (const repos of this.repositoriesByUri.values()) {
@@ -476,6 +571,17 @@ export class WorkspaceEntityIndex {
 					result.push(r);
 				}
 			}
+		}
+		if (!contextUri || result.length <= 1) {
+			return result;
+		}
+		const sameModuleRepos = result.filter((r) => isSameModule(r.uri, contextUri));
+		if (sameModuleRepos.length > 0) {
+			return sameModuleRepos;
+		}
+		const sharedModuleRepos = result.filter((r) => isSameOrSharedModule(r.uri, contextUri));
+		if (sharedModuleRepos.length > 0) {
+			return sharedModuleRepos;
 		}
 		return result;
 	}
@@ -811,6 +917,7 @@ export function createEntityLookup(
 	entities: readonly EntityInfo[],
 	preferredPackage?: string,
 	sourceText?: string,
+	contextUri?: vscode.Uri,
 ): Map<string, EntityInfo> {
 	const lookup = new Map<string, EntityInfo>();
 	const priorities = new Map<string, number>();
@@ -822,11 +929,18 @@ export function createEntityLookup(
 	for (const entity of entities) {
 		const qualifiedName = entity.packageName ? `${entity.packageName}.${entity.name}` : entity.name;
 		lookup.set(qualifiedName.toLowerCase(), entity);
-		const priority = imports.get(entity.name.toLowerCase())?.toLowerCase() === qualifiedName.toLowerCase()
-			? 3
-			: preferredPackage && entity.packageName === preferredPackage
-				? 2
-				: 1;
+		const isImported = imports.get(entity.name.toLowerCase())?.toLowerCase() === qualifiedName.toLowerCase();
+		const sameMod = contextUri ? isSameModule(entity.uri, contextUri) : true;
+		const sharedMod = contextUri ? isSameOrSharedModule(entity.uri, contextUri) : true;
+		const priority = isImported
+			? 5
+			: preferredPackage && entity.packageName === preferredPackage && sameMod
+				? 4
+				: sameMod
+					? 3
+					: sharedMod
+						? 2
+						: 1;
 		for (const name of new Set([entity.name, entity.entityName].filter((candidate): candidate is string => Boolean(candidate)))) {
 			const key = name.toLowerCase();
 			if ((priorities.get(key) ?? 0) < priority) {
@@ -858,13 +972,7 @@ export function getIndexedEntities(currentDocument: vscode.TextDocument): readon
 	if (isExcludedJavaUri(currentDocument.uri, includeTestSources)) {
 		return [];
 	}
-	const currentEntities = index.getEntitiesForUri(currentDocument.uri);
-	const all = index.getAllEntities();
-	if (currentEntities.length === 0) {
-		return all;
-	}
-	const otherEntities = all.filter((e) => e.uri.toString() !== currentDocument.uri.toString());
-	return [...currentEntities, ...otherEntities];
+	return index.getEntitiesForDocument(currentDocument);
 }
 
 export function clearEntityCache(): void {
@@ -883,6 +991,7 @@ export function findEntityProperties(
 	repositoryText: string,
 	entities: readonly EntityInfo[],
 	repositoryEntityName?: string,
+	contextUri?: vscode.Uri,
 ): readonly EntityProperty[] {
 	const names = repositoryEntityName ? [repositoryEntityName] : extractRepositoryEntityNames(repositoryText);
 	const repositoryPackage = repositoryText.match(PACKAGE_DECLARATION)?.[1];
@@ -903,7 +1012,7 @@ export function findEntityProperties(
 			: namedEntities;
 
 	const properties = new Map<string, EntityProperty>();
-	const entitiesByName = createEntityLookup(entities, repositoryPackage, repositoryText);
+	const entitiesByName = createEntityLookup(entities, repositoryPackage, repositoryText, contextUri);
 
 	for (const entity of selected) {
 		const fullEntity = resolveEntityHierarchy(entity, entitiesByName);

@@ -12,9 +12,9 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 	): Promise<vscode.Definition | undefined> {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const entities = index.getAllEntities();
+		const entities = index.getEntitiesForDocument(document);
 		const repositoryPackage = document.getText().match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
-		const entityMap = createEntityLookup(entities, repositoryPackage, document.getText());
+		const entityMap = createEntityLookup(entities, repositoryPackage, document.getText(), document.uri);
 
 		const lineText = document.lineAt(position.line).text;
 		const wordRange = document.getWordRangeAtPosition(position);

@@ -12,9 +12,9 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
 		const docText = document.getText();
-		const allEntities = index.getAllEntities();
+		const allEntities = index.getEntitiesForDocument(document);
 		const repositoryPackage = docText.match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
-		const entityLookup = createEntityLookup(allEntities, repositoryPackage, docText);
+		const entityLookup = createEntityLookup(allEntities, repositoryPackage, docText, document.uri);
 		const lenses: vscode.CodeLens[] = [];
 
 		// 1. CodeLens on Repository interfaces: Link to Managed Entity
@@ -42,7 +42,7 @@ export class SpringJpaCodeLensProvider implements vscode.CodeLensProvider {
 			const entityRange = new vscode.Range(entityPos, new vscode.Position(entity.location.line, entity.location.character + entity.name.length));
 
 			// Find repositories in index or open workspace documents that manage this entity
-			const indexedRepos = index.getRepositoriesForEntity(entity.name);
+			const indexedRepos = index.getRepositoriesForEntity(entity.name, document.uri);
 
 			for (const repo of indexedRepos) {
 				if (repo.uri.toString() === document.uri.toString()) {

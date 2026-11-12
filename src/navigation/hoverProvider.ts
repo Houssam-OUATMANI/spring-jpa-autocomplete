@@ -13,7 +13,7 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 	): Promise<vscode.Hover | undefined> {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const entities = index.getAllEntities();
+		const entities = index.getEntitiesForDocument(document);
 		const offset = document.offsetAt(position);
 		const docText = document.getText();
 		if (/@(?:Query|Aggregation)\s*\(/.test(docText) && MONGO_REPOSITORY_TYPES.test(docText)) {
