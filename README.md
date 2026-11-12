@@ -230,7 +230,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The latest release is `2.0.0`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
+The latest release is `2.1.0`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ## Requirements
 
