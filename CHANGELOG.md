@@ -5,6 +5,30 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 
+## [2.1.0] - 2026-11-12
+
+### Added
+
+- **Multi-Module & Microservice Architecture Support**:
+  - **Automatic Module & Project Detection**: Automatically discovers Maven reactor modules (`pom.xml` with `<modules>`), Gradle multi-project builds (`settings.gradle` / `settings.gradle.kts` with `include`), and standalone microservice subprojects.
+  - **Microservice Bounded Context Isolation**: Completely scopes entities, DTOs, and repositories to their respective microservice. Homonymous entities across services (e.g. `auth-service`'s `User` vs `order-service`'s `User`) are strictly isolated, eliminating name clashes, false error diagnostics, and query validation failures.
+  - **Shared Library & Common Module Inheritance**: Automatically identifies shared libraries and core modules (`common-lib`, `core-domain`, `*-shared`, `*-dto`), allowing microservice entities to seamlessly inherit from common `@MappedSuperclass` base entities without cross-contaminating other microservices.
+  - **Scoped Projections & DTOs**: JPQL `SELECT NEW ...` constructor autocompletion is scoped to the active microservice and shared libraries, eliminating autocomplete clutter from unrelated service DTOs.
+  - **Scoped Navigation & CodeLens**: CodeLens links, Go to Definition (`F12`), Find References (`Shift+F12`), and Rename (`F2`) are scoped to the active microservice, preventing links and refactorings from leaking into separate microservices.
+- **Localized SQL Dialect Resolution & Spring Profile Support**:
+  - **Per-Service SQL Dialect Resolution**: Detects database dialects independently for each microservice from its local `src/main/resources` configuration, preventing dialect cross-talk between microservices (e.g. PostgreSQL in Service A, MySQL in Service B).
+  - **Spring Profiles & Modern Drivers**: Full support for `application-*.yml`, `application-*.yaml`, `application-*.properties`, `bootstrap.yml`, and `bootstrap-*.yml`. Automatically detects dialects from `spring.r2dbc.url` and driver class names (e.g. `oracle.jdbc.OracleDriver`).
+- **Dynamic Multi-Root Workspace & Configuration Watchers**:
+  - **Dynamic Workspace Folders (`onDidChangeWorkspaceFolders`)**: Automatically updates indices and cleans up diagnostics when adding or removing folders in VS Code multi-root workspaces (`.code-workspace`).
+  - **Active Build & Config File Watchers**: Reacts dynamically to additions, edits, or removals of `pom.xml`, `build.gradle`, `settings.gradle`, and `application*.yml/properties`.
+
+### Performance & Stability
+
+- **Eliminated Cascading Diagnostic Ping-Pong** — Prevented recursive cross-tab diagnostic storms across open editor documents.
+- **Ultra-Fast Source Masking** — Replaced character array allocations in `maskJavaSource` with optimized C++ regex replacements and single-turn identity memoization (4.5x faster, zero garbage collection churn).
+- **Lightweight Typing Guards** — Keystroke analysis on non-JPA Java files exits in < 1 µs, and Memento disk cache persistence is deferred exclusively to real file saves (`onDidSaveTextDocument`).
+- **Bounded Entity Graphs & Lookbacks** — Capped entity association graph recursion depth and CodeAction lookback windows to prevent stalls in large codebases.
+
 ## [2.0.0] - 2026-11-09
 
 ### Added

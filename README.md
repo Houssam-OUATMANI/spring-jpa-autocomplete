@@ -1,6 +1,6 @@
 # Spring Data JPA & MongoDB Tools
 
-**Version 2.0.0**
+**Version 2.1.0**
 
 [Install from Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 <br>
@@ -110,6 +110,14 @@ Mongo document fields power derived-query completion. Inside Mongo `@Query` and 
 The **Convert to @Query (MongoDB)** refactoring converts supported derived repository methods into Mongo JSON queries with positional parameters, mapped `@Field` names, regex flags for case-insensitive substring matching, sort metadata, and `count` / `exists` / `delete` options. It resolves paths through embedded POJOs and collection elements too, so `List<Post> findByTagsName(String tagsName)` can target `tags.name`. It is not offered when modifiers or predicates cannot be represented without changing the method's behavior.
 
 `MongoTemplate` and `ReactiveMongoTemplate` Criteria fields are completed and validated when the method's template operation identifies its document type. Mongo query diagnostics can be configured independently with `springJpa.diagnostics.mongoQueries`.
+
+### Multi-Module & Microservice Workspaces (Maven / Gradle / Multi-Root)
+
+In complex monorepos, multi-project builds, or microservice wrappers:
+- **Bounded Context Isolation**: Entities, repositories, and DTOs with identical names across distinct microservices (e.g. `auth-service`'s `User` vs. `order-service`'s `User`) are strictly scoped. Autocompletion and diagnostics never confuse or cross-pollinate models between services.
+- **Shared Libraries & Common Modules**: Base entities and `@MappedSuperclass` models defined in shared libraries (e.g. `common-lib`, `core-domain`) are inherited seamlessly across all dependent microservices.
+- **Localized SQL Dialect & Profiles**: Each microservice automatically detects its own database dialect from its local `src/main/resources/application*.yml` or `application*.properties`, supporting Spring profiles (e.g. `application-dev.yml`), R2DBC URLs, and database driver classes.
+- **Dynamic Multi-Root Support**: VS Code multi-root workspaces (`.code-workspace`) and build descriptor updates (`pom.xml`, `build.gradle`, `settings.gradle`) are dynamically tracked without needing to restart the editor.
 
 ## Feature Reference
 
