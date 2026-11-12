@@ -165,3 +165,4 @@ export function isSameOrSharedModule(targetUri: vscode.Uri | string, contextUri:
 	const contextMod = resolveModuleInfo(contextUri);
 	return targetMod.id === contextMod.id || targetMod.isShared;
 }
+

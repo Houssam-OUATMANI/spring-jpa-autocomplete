@@ -21,7 +21,7 @@ import { JPQL_FUNCTIONS, JPQL_KEYWORDS } from '../jpql/jpqlLanguage';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 import { createJpqlCompletions } from '../jpql/jpqlCompletion';
 import { maskJavaSource } from '../javaParsing';
-import { detectSqlDialect, resolveSqlDialect, setDocumentSqlDialect } from '../jpql/sqlDialect';
+import { clearDialectCache, detectSqlDialect, isDialectConfigFile, resolveSqlDialect, setDocumentSqlDialect } from '../jpql/sqlDialect';
 import { validateJpaEntities } from '../entityValidator';
 import { convertDerivedQueryToJpql } from '../derivedQuery/queryToJpql';
 import { convertDerivedQueryToMongoQuery } from '../derivedQuery/queryToMongo';
@@ -2792,5 +2792,59 @@ public class CustomService {
 		assert.strictEqual(orderRepos[0].uri.toString(), orderRepoUri.toString());
 
 		index.clear(false);
+	});
+
+	test('detectSqlDialect detects dialects from Spring profiles, r2dbc, and driver class names', () => {
+		// application-dev.yml with Postgres
+		assert.strictEqual(detectSqlDialect(['spring:\n  datasource:\n    url: jdbc:postgresql://localhost:5432/mydb']), 'postgresql');
+		// application-prod.properties with r2dbc mysql
+		assert.strictEqual(detectSqlDialect(['spring.r2dbc.url=r2dbc:mysql://localhost:3306/proddb']), 'mysql');
+		// driver-class-name oracle
+		assert.strictEqual(detectSqlDialect(['spring.datasource.driver-class-name: oracle.jdbc.OracleDriver']), 'oracle');
+		// database-platform sqlserver
+		assert.strictEqual(detectSqlDialect(['spring.jpa.database-platform=org.hibernate.dialect.SQLServer2012Dialect']), 'sqlserver');
+		// isDialectConfigFile matching
+		assert.strictEqual(isDialectConfigFile('auth-service/src/main/resources/application-dev.yml'), true);
+		assert.strictEqual(isDialectConfigFile('order-service/src/main/resources/application.properties'), true);
+		assert.strictEqual(isDialectConfigFile('service/src/main/resources/bootstrap.yml'), true);
+		assert.strictEqual(isDialectConfigFile('service/src/main/java/com/example/User.java'), false);
+	});
+
+	test('resolveSqlDialect scopes SQL dialect detection per microservice', async () => {
+		clearModuleCache();
+		clearDialectCache();
+
+		const authConfigUri = vscode.Uri.parse('file:///workspace/auth-service/src/main/resources/application-dev.yml');
+		const orderConfigUri = vscode.Uri.parse('file:///workspace/order-service/src/main/resources/application.properties');
+
+		const originalFindFiles = vscode.workspace.findFiles;
+		const originalOpenTextDocument = vscode.workspace.openTextDocument;
+
+		(vscode.workspace as any).findFiles = async () => [authConfigUri, orderConfigUri];
+		(vscode.workspace as any).openTextDocument = async (uri: any) => {
+			const uriStr = uri?.toString?.() ?? '';
+			if (uriStr.includes('auth-service')) {
+				return { getText: () => 'spring.datasource.url=jdbc:postgresql://localhost:5432/auth' };
+			}
+			if (uriStr.includes('order-service')) {
+				return { getText: () => 'spring.datasource.url=jdbc:mysql://localhost:3306/orders' };
+			}
+			return { getText: () => '' };
+		};
+
+		const authDoc = { uri: vscode.Uri.parse('file:///workspace/auth-service/src/main/java/com/example/auth/UserRepository.java') } as any;
+		const orderDoc = { uri: vscode.Uri.parse('file:///workspace/order-service/src/main/java/com/example/order/OrderRepository.java') } as any;
+
+		const authDialect = await resolveSqlDialect(authDoc);
+		assert.strictEqual(authDialect, 'postgresql', 'auth-service should detect postgresql from its local configuration');
+
+		const orderDialect = await resolveSqlDialect(orderDoc);
+		assert.strictEqual(orderDialect, 'mysql', 'order-service should detect mysql from its local configuration');
+
+		// Cleanup
+		clearModuleCache();
+		clearDialectCache();
+		(vscode.workspace as any).findFiles = originalFindFiles;
+		(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
 	});
 });

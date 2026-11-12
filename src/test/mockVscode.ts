@@ -47,6 +47,8 @@ export class Uri {
 
 export const workspace = {
 	textDocuments: [] as any[],
+	workspaceFolders: [] as any[],
+	onDidChangeWorkspaceFolders: () => ({ dispose: () => {} }),
 	findFiles: async () => [] as Uri[],
 	getConfiguration: (_section?: string) => ({
 		get: <T>(_key: string, defaultValue?: T): T => defaultValue as T,

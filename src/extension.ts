@@ -13,7 +13,8 @@ import { SpringJpaCodeLensProvider } from './navigation/codeLensProvider';
 import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
 import { maskJavaSource, parseJavaParameters } from './javaParsing';
-import { resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
+import { clearDialectCache, resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
+import { clearModuleCache, discoverWorkspaceModules } from './workspace/moduleResolver';
 import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
@@ -48,6 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const message = error instanceof Error ? error.message : String(error);
 		output.appendLine(`Could not initialize the Spring JPA entity index: ${message}`);
 	});
+	void discoverWorkspaceModules();
 	const isExcludedJavaDocument = (document: vscode.TextDocument) => isExcludedJavaUri(
 		document.uri,
 		vscode.workspace.getConfiguration('springJpa').get<boolean>('includeTestSources', true),
@@ -55,6 +57,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const rebuildIndex = vscode.commands.registerCommand('springJpa.rebuildIndex', async () => {
 		const started = Date.now();
+		clearModuleCache();
+		clearDialectCache();
+		void discoverWorkspaceModules();
 		entityIndex.clear(true);
 		await entityIndex.ensureInitialized();
 		for (const document of vscode.workspace.textDocuments) {
@@ -250,6 +255,50 @@ export function activate(context: vscode.ExtensionContext) {
 		scheduleWorkspaceJavaDiagnostics();
 	});
 	context.subscriptions.push(watcher);
+
+	// Watcher for build descriptors (Maven POMs, Gradle build/settings files)
+	const buildWatcher = vscode.workspace.createFileSystemWatcher('**/{pom.xml,build.gradle,build.gradle.kts,settings.gradle,settings.gradle.kts}');
+	const handleBuildChange = () => {
+		clearModuleCache();
+		void discoverWorkspaceModules();
+		scheduleWorkspaceJavaDiagnostics();
+	};
+	buildWatcher.onDidChange(handleBuildChange);
+	buildWatcher.onDidCreate(handleBuildChange);
+	buildWatcher.onDidDelete(handleBuildChange);
+	context.subscriptions.push(buildWatcher);
+
+	// Watcher for Spring / DB configuration files
+	const configWatcher = vscode.workspace.createFileSystemWatcher('**/{application*,bootstrap*,persistence.xml,hibernate.properties}');
+	const handleConfigChange = () => {
+		clearDialectCache();
+		scheduleWorkspaceJavaDiagnostics();
+	};
+	configWatcher.onDidChange(handleConfigChange);
+	configWatcher.onDidCreate(handleConfigChange);
+	configWatcher.onDidDelete(handleConfigChange);
+	context.subscriptions.push(configWatcher);
+
+	// Dynamic workspace folder addition and removal listener
+	if (typeof vscode.workspace.onDidChangeWorkspaceFolders === 'function') {
+		context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+			clearModuleCache();
+			clearDialectCache();
+			void discoverWorkspaceModules();
+			for (const removed of event.removed) {
+				const prefix = removed.uri.toString();
+				for (const [uriKey] of (entityIndex as any).entitiesByUri ?? []) {
+					if (uriKey.startsWith(prefix)) {
+						entityIndex.removeUri(vscode.Uri.parse(uriKey));
+						diagnostics.delete(vscode.Uri.parse(uriKey));
+					}
+				}
+			}
+			for (const _added of event.added) {
+				void entityIndex.ensureInitialized().then(() => scheduleWorkspaceJavaDiagnostics());
+			}
+		}));
+	}
 
 	const diagnostics = vscode.languages.createDiagnosticCollection('spring-jpa-autocomplete');
 	context.subscriptions.push(diagnostics);
