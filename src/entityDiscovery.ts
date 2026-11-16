@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { EntityInfo, EntityProperty, parseEntityModels, ProjectionTypeInfo, PropertyLocation } from './entityModel';
 import { extractRepositoryEntityNames, extractRepositoryInfos, RepositoryInfo } from './repositoryIndex';
-import { isSameModule, isSameOrSharedModule } from './workspace/moduleResolver';
+import { isSameModule, isSameOrSharedModule, normalizePath } from './workspace/moduleResolver';
 
 export { EntityInfo, EntityProperty, ProjectionTypeInfo, PropertyLocation, RepositoryInfo };
 export { extractRepositoryEntityNames, extractRepositoryInfos } from './repositoryIndex';
@@ -262,6 +262,83 @@ export class WorkspaceEntityIndex {
 			}
 			throw error;
 		}
+	}
+
+	public isReady(): boolean {
+		return this.isInitialized;
+	}
+
+	public async scanFolder(folder: vscode.Uri | string): Promise<void> {
+		if (typeof vscode.workspace?.findFiles !== 'function') {
+			return;
+		}
+		try {
+			const folderPath = normalizePath(folder).toLowerCase();
+			const includeTestSources = this.includeTestSources();
+			const excluded = includeTestSources
+				? '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist}/**'
+				: '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist,src/test}/**';
+			const files = await vscode.workspace.findFiles('**/*.java', excluded);
+			const folderFiles = files.filter((f) => {
+				const np = normalizePath(f).toLowerCase();
+				return np.startsWith(folderPath + '/') || np === folderPath;
+			});
+			if (folderFiles.length === 0) {
+				return;
+			}
+			for (const uri of folderFiles) {
+				try {
+					if (isExcludedJavaUri(uri, includeTestSources)) {
+						continue;
+					}
+					const doc = await vscode.workspace.openTextDocument(uri);
+					this.updateDocument(doc, false);
+				} catch {
+					// ignore
+				}
+			}
+			this.allEntitiesCache = undefined;
+			this.projectionTypesCache = undefined;
+			this.schedulePersistCache();
+		} catch {
+			// ignore
+		}
+	}
+
+	public async discoverMissingEntity(entityName: string, contextUri?: vscode.Uri): Promise<EntityInfo | undefined> {
+		if (typeof vscode.workspace?.findFiles !== 'function') {
+			return undefined;
+		}
+		try {
+			const includeTestSources = this.includeTestSources();
+			const excluded = includeTestSources
+				? '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist}/**'
+				: '**/{node_modules,target,build,out,.gradle,.vscode-test,.git,.idea,.settings,.vscode,bin,dist,src/test}/**';
+			const candidates = await vscode.workspace.findFiles(`**/${entityName}.java`, excluded, 10);
+			if (candidates.length === 0) {
+				return undefined;
+			}
+			if (contextUri && candidates.length > 1) {
+				candidates.sort((a, b) => {
+					const sameA = isSameModule(a, contextUri) ? 2 : isSameOrSharedModule(a, contextUri) ? 1 : 0;
+					const sameB = isSameModule(b, contextUri) ? 2 : isSameOrSharedModule(b, contextUri) ? 1 : 0;
+					return sameB - sameA;
+				});
+			}
+			for (const uri of candidates) {
+				if (isExcludedJavaUri(uri, includeTestSources)) {
+					continue;
+				}
+				const doc = await vscode.workspace.openTextDocument(uri);
+				const entity = this.updateDocument(doc, false);
+				if (entity && entity.name.toLowerCase() === entityName.toLowerCase()) {
+					return entity;
+				}
+			}
+		} catch {
+			// ignore
+		}
+		return undefined;
 	}
 
 	public didLastUpdateCauseStructuralChange(): boolean {
@@ -961,7 +1038,20 @@ export async function discoverEntities(currentDocument: vscode.TextDocument): Pr
 		return [];
 	}
 	await index.ensureInitialized();
-	return getIndexedEntities(currentDocument);
+	let entities = getIndexedEntities(currentDocument);
+
+	// On-demand entity discovery: if this repository's entity is not yet in the index
+	const managedNames = extractRepositoryEntityNames(currentDocument.getText());
+	for (const name of managedNames) {
+		if (!entities.some((e) => e.name.toLowerCase() === name.toLowerCase())) {
+			const discovered = await index.discoverMissingEntity(name, currentDocument.uri);
+			if (discovered) {
+				entities = getIndexedEntities(currentDocument);
+			}
+		}
+	}
+
+	return entities;
 }
 
 export function getIndexedEntities(currentDocument: vscode.TextDocument): readonly EntityInfo[] {

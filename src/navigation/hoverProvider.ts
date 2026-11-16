@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createEntityLookup, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, discoverEntities, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 import { getMongoOperatorAt, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
@@ -13,7 +13,10 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 	): Promise<vscode.Hover | undefined> {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const entities = index.getEntitiesForDocument(document);
+		let entities = index.getEntitiesForDocument(document);
+		if (entities.length === 0) {
+			entities = await discoverEntities(document);
+		}
 		const offset = document.offsetAt(position);
 		const docText = document.getText();
 		if (/@(?:Query|Aggregation)\s*\(/.test(docText) && MONGO_REPOSITORY_TYPES.test(docText)) {

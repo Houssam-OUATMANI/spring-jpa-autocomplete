@@ -15,6 +15,11 @@ const BUILD_FILE_EXCLUDES = '**/{node_modules,target,build,out,.gradle,.vscode-t
 
 export function normalizePath(input: string | vscode.Uri): string {
 	let pathStr = typeof input === 'string' ? input : ((input as any).fsPath ?? input.path ?? '');
+	try {
+		pathStr = decodeURIComponent(pathStr);
+	} catch {
+		// ignore
+	}
 	if (pathStr.startsWith('file:///')) {
 		pathStr = pathStr.slice(7);
 	} else if (pathStr.startsWith('file://')) {
@@ -23,6 +28,9 @@ export function normalizePath(input: string | vscode.Uri): string {
 	pathStr = pathStr.replace(/\\/g, '/');
 	if (/^\/[a-zA-Z]:\//.test(pathStr)) {
 		pathStr = pathStr.slice(1);
+	}
+	if (/^[a-zA-Z]:\//.test(pathStr)) {
+		pathStr = pathStr[0].toLowerCase() + pathStr.slice(1);
 	}
 	if (pathStr.length > 1 && pathStr.endsWith('/')) {
 		pathStr = pathStr.slice(0, -1);

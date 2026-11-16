@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createEntityLookup, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 import { findMongoFieldAt, findMongoTemplateFieldAccesses, isMongoRepositoryAt, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
@@ -12,7 +12,10 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 	): Promise<vscode.Definition | undefined> {
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
-		const entities = index.getEntitiesForDocument(document);
+		let entities = index.getEntitiesForDocument(document);
+		if (entities.length === 0) {
+			entities = await discoverEntities(document);
+		}
 		const repositoryPackage = document.getText().match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
 		const entityMap = createEntityLookup(entities, repositoryPackage, document.getText(), document.uri);
 

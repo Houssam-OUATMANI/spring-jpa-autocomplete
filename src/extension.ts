@@ -14,7 +14,7 @@ import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
 import { maskJavaSource, parseJavaParameters } from './javaParsing';
 import { clearDialectCache, resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
-import { clearModuleCache, discoverWorkspaceModules } from './workspace/moduleResolver';
+import { clearModuleCache, discoverWorkspaceModules, normalizePath } from './workspace/moduleResolver';
 import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
@@ -45,7 +45,9 @@ export function activate(context: vscode.ExtensionContext) {
 	const output = vscode.window.createOutputChannel('Spring Data JPA Tools');
 	context.subscriptions.push(output);
 	void showInstallationWelcome(context, output);
-	void entityIndex.ensureInitialized().catch((error: unknown) => {
+	void entityIndex.ensureInitialized().then(() => {
+		scheduleWorkspaceJavaDiagnostics();
+	}).catch((error: unknown) => {
 		const message = error instanceof Error ? error.message : String(error);
 		output.appendLine(`Could not initialize the Spring JPA entity index: ${message}`);
 	});
@@ -238,6 +240,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 		try {
+			clearModuleCache();
 			const doc = await vscode.workspace.openTextDocument(uri);
 			await indexJavaDocument(doc);
 		} catch (error) {
@@ -256,17 +259,41 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 	context.subscriptions.push(watcher);
 
-	// Watcher for build descriptors (Maven POMs, Gradle build/settings files)
-	const buildWatcher = vscode.workspace.createFileSystemWatcher('**/{pom.xml,build.gradle,build.gradle.kts,settings.gradle,settings.gradle.kts}');
-	const handleBuildChange = () => {
-		clearModuleCache();
-		void discoverWorkspaceModules();
-		scheduleWorkspaceJavaDiagnostics();
-	};
-	buildWatcher.onDidChange(handleBuildChange);
-	buildWatcher.onDidCreate(handleBuildChange);
-	buildWatcher.onDidDelete(handleBuildChange);
-	context.subscriptions.push(buildWatcher);
+	// Watchers for build descriptors (Maven POMs, Gradle build/settings files) across microservices
+	const buildPatterns = [
+		'**/pom.xml',
+		'**/build.gradle',
+		'**/build.gradle.kts',
+		'**/settings.gradle',
+		'**/settings.gradle.kts',
+	];
+	for (const pattern of buildPatterns) {
+		const bWatcher = vscode.workspace.createFileSystemWatcher(pattern);
+		bWatcher.onDidCreate(async (uri) => {
+			clearModuleCache();
+			void discoverWorkspaceModules();
+			const normalized = normalizePath(uri);
+			const lastSlash = normalized.lastIndexOf('/');
+			if (lastSlash > 0) {
+				const moduleDir = normalized.slice(0, lastSlash);
+				await entityIndex.scanFolder(moduleDir);
+			}
+			scheduleWorkspaceJavaDiagnostics();
+		});
+		bWatcher.onDidChange(() => {
+			clearModuleCache();
+			clearDialectCache();
+			void discoverWorkspaceModules();
+			scheduleWorkspaceJavaDiagnostics();
+		});
+		bWatcher.onDidDelete(() => {
+			clearModuleCache();
+			clearDialectCache();
+			void discoverWorkspaceModules();
+			scheduleWorkspaceJavaDiagnostics();
+		});
+		context.subscriptions.push(bWatcher);
+	}
 
 	// Watcher for Spring / DB configuration files
 	const configWatcher = vscode.workspace.createFileSystemWatcher('**/{application*,bootstrap*,persistence.xml,hibernate.properties}');
@@ -315,7 +342,10 @@ export function activate(context: vscode.ExtensionContext) {
 				if (isRepositoryDeclarationHeader(sourcePrefix)) {
 					return undefined;
 				}
-				const entities = getIndexedEntities(document);
+				let entities = getIndexedEntities(document);
+				if (entities.length === 0) {
+					entities = await discoverEntities(document);
+				}
 
 				if (/\b(?:Reactive)?MongoTemplate\b/.test(docText) && /\bCriteria\s*\.\s*where\s*\(/.test(docText)) {
 					const mongoTemplateItems = createMongoTemplateCompletions(document, position, entities);

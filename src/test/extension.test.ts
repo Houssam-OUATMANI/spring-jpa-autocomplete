@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
-import { createEntityLookup, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, getIndexedEntities, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
-import { clearModuleCache, isSameModule, isSameOrSharedModule, registerModuleRoot, resolveModuleInfo } from '../workspace/moduleResolver';
+import { createEntityLookup, discoverEntities, extractRepositoryEntityNameAt, extractRepositoryEntityNames, findEntityProperties, getIndexedEntities, isExcludedJavaUri, parseEntity, resolveEntityHierarchy, resolveEntityPropertyPath, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { clearModuleCache, isSameModule, isSameOrSharedModule, normalizePath, registerModuleRoot, resolveModuleInfo } from '../workspace/moduleResolver';
 import { parseEntityModel, parseEntityModels, ProjectionTypeInfo } from '../entityModel';
 import { parseEntityModelAst, parseEntityModelsAst } from '../javaAstParser';
 import { createQueryMethodSuggestions, extractPropertyNames, isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from '../jpaKeywords';
@@ -2844,6 +2844,112 @@ public class CustomService {
 		// Cleanup
 		clearModuleCache();
 		clearDialectCache();
+		(vscode.workspace as any).findFiles = originalFindFiles;
+		(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+	});
+
+	test('normalizePath standardizes Windows drive letters, slashes, and decodes URI components (%3A)', () => {
+		assert.strictEqual(normalizePath('D:\\Labo\\service\\User.java'), 'd:/Labo/service/User.java');
+		assert.strictEqual(normalizePath('file:///d%3A/Labo/service/User.java'), 'd:/Labo/service/User.java');
+		assert.strictEqual(normalizePath('file:///D:/Labo/service/User.java'), 'd:/Labo/service/User.java');
+		assert.strictEqual(normalizePath('/d:/Labo/service/User.java'), 'd:/Labo/service/User.java');
+		assert.strictEqual(normalizePath('/workspace/service/User.java'), '/workspace/service/User.java');
+	});
+
+	test('discoverEntities on-demand discovers and indexes missing entities in new microservices without IDE restart', async () => {
+		clearModuleCache();
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(false);
+
+		const paymentEntityUri = vscode.Uri.parse('file:///workspace/payment-service/src/main/java/com/example/payment/Payment.java');
+		const paymentRepoUri = vscode.Uri.parse('file:///workspace/payment-service/src/main/java/com/example/payment/PaymentRepository.java');
+
+		const originalFindFiles = vscode.workspace.findFiles;
+		const originalOpenTextDocument = vscode.workspace.openTextDocument;
+
+		(vscode.workspace as any).findFiles = async (pattern: any) => {
+			const patStr = typeof pattern === 'string' ? pattern : pattern?.pattern ?? '';
+			if (patStr.includes('Payment.java')) {
+				return [paymentEntityUri];
+			}
+			return [];
+		};
+		(vscode.workspace as any).openTextDocument = async (uri: any) => {
+			const uriStr = uri?.toString?.() ?? '';
+			if (uriStr.includes('Payment.java')) {
+				return {
+					uri: paymentEntityUri,
+					languageId: 'java',
+					getText: () => 'package com.example.payment; @Entity public class Payment { @Id private Long id; private String status; }',
+				};
+			}
+			return { getText: () => '' };
+		};
+
+		const repoDoc = {
+			uri: paymentRepoUri,
+			languageId: 'java',
+			getText: () => 'package com.example.payment; public interface PaymentRepository extends JpaRepository<Payment, Long> {}',
+		} as any;
+
+		// Before discoverEntities, Payment is NOT in memory
+		assert.strictEqual(index.getAllEntities().length, 0);
+
+		// Calling discoverEntities triggers on-demand auto-discovery of Payment
+		const discovered = await discoverEntities(repoDoc);
+		assert.ok(discovered.some((e) => e.name === 'Payment'), 'Payment should be automatically discovered on-demand');
+		assert.strictEqual(index.getAllEntities().some((e) => e.name === 'Payment'), true, 'Payment entity should be indexed in memory');
+
+		// Cleanup
+		clearModuleCache();
+		index.clear(false);
+		(vscode.workspace as any).findFiles = originalFindFiles;
+		(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+	});
+
+	test('scanFolder indexes all files in a newly created microservice folder', async () => {
+		clearModuleCache();
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(false);
+
+		const invoiceEntityUri = vscode.Uri.parse('file:///workspace/invoice-service/src/main/java/com/example/invoice/Invoice.java');
+		const invoiceRepoUri = vscode.Uri.parse('file:///workspace/invoice-service/src/main/java/com/example/invoice/InvoiceRepository.java');
+
+		const originalFindFiles = vscode.workspace.findFiles;
+		const originalOpenTextDocument = vscode.workspace.openTextDocument;
+
+		(vscode.workspace as any).findFiles = async () => [invoiceEntityUri, invoiceRepoUri];
+		(vscode.workspace as any).openTextDocument = async (uri: any) => {
+			const uriStr = uri?.toString?.() ?? '';
+			if (uriStr.includes('Invoice.java')) {
+				return {
+					uri: invoiceEntityUri,
+					languageId: 'java',
+					getText: () => 'package com.example.invoice; @Entity public class Invoice { @Id private Long id; private Double total; }',
+				};
+			}
+			if (uriStr.includes('InvoiceRepository.java')) {
+				return {
+					uri: invoiceRepoUri,
+					languageId: 'java',
+					getText: () => 'package com.example.invoice; public interface InvoiceRepository extends JpaRepository<Invoice, Long> {}',
+				};
+			}
+			return { getText: () => '' };
+		};
+
+		// Scan the newly added microservice folder
+		await index.scanFolder('file:///workspace/invoice-service');
+
+		const entities = index.getAllEntities();
+		assert.strictEqual(entities.length, 1);
+		assert.strictEqual(entities[0].name, 'Invoice');
+		assert.strictEqual(index.getAllRepositories().length, 1);
+		assert.strictEqual(index.getAllRepositories()[0].name, 'InvoiceRepository');
+
+		// Cleanup
+		clearModuleCache();
+		index.clear(false);
 		(vscode.workspace as any).findFiles = originalFindFiles;
 		(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
 	});
