@@ -2953,4 +2953,70 @@ public class CustomService {
 		(vscode.workspace as any).findFiles = originalFindFiles;
 		(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
 	});
+
+	test('SpringJpaCodeLensProvider discovers missing entity and renders CodeLens even when index already has unrelated entities', async () => {
+		const index = WorkspaceEntityIndex.getInstance();
+		index.clear(false);
+		clearModuleCache();
+
+		// Pre-populate index with an unrelated entity from 'other-service'
+		const otherEntityUri = vscode.Uri.parse('file:///workspace/other-service/src/main/java/com/example/other/Other.java');
+		const otherDoc = {
+			uri: otherEntityUri,
+			languageId: 'java',
+			getText: () => 'package com.example.other; @Entity public class Other { @Id private Long id; }',
+		} as any;
+		index.updateDocument(otherDoc);
+		assert.strictEqual(index.getAllEntities().length, 1);
+
+		// Now test user-service with User and UserRepository
+		const userEntityUri = vscode.Uri.parse('file:///workspace/user-service/src/main/java/com/example/user/User.java');
+		const userRepoUri = vscode.Uri.parse('file:///workspace/user-service/src/main/java/com/example/user/UserRepository.java');
+
+		const originalFindFiles = vscode.workspace.findFiles;
+		const originalOpenTextDocument = vscode.workspace.openTextDocument;
+
+		(vscode.workspace as any).findFiles = async (pattern: string) => {
+			if (pattern.includes('User.java')) {
+				return [userEntityUri];
+			}
+			return [];
+		};
+		(vscode.workspace as any).openTextDocument = async (uri: any) => {
+			const uriStr = uri?.toString?.() ?? '';
+			if (uriStr.includes('User.java')) {
+				return {
+					uri: userEntityUri,
+					languageId: 'java',
+					getText: () => 'package com.example.user; @Entity public class User { @Id private java.util.UUID id; private String username; private String email; }',
+				};
+			}
+			return { getText: () => '' };
+		};
+
+		const userRepoDoc = {
+			uri: userRepoUri,
+			languageId: 'java',
+			getText: () => 'package com.example.user; public interface UserRepository extends JpaRepository<User, UUID> {}',
+			positionAt: (offset: number) => new vscode.Position(0, offset),
+		} as any;
+
+		const codeLensProvider = new SpringJpaCodeLensProvider();
+		const lenses = await codeLensProvider.provideCodeLenses(userRepoDoc, {} as any);
+
+		assert.strictEqual(lenses.length, 1, 'CodeLens must be provided for UserRepository');
+		assert.ok(lenses[0].command?.title.includes("Managed Entity 'User' (3 properties)"), `CodeLens title was: ${lenses[0].command?.title}`);
+
+		// Also check that findEntityProperties resolves User's 3 properties
+		const resolvedEntities = index.getEntitiesForDocument(userRepoDoc);
+		const properties = findEntityProperties(userRepoDoc.getText(), resolvedEntities, 'User', userRepoUri);
+		assert.strictEqual(properties.length, 3, 'User entity should have 3 properties resolved');
+		assert.deepStrictEqual(properties.map((p) => p.name).sort(), ['email', 'id', 'username']);
+
+		// Cleanup
+		clearModuleCache();
+		index.clear(false);
+		(vscode.workspace as any).findFiles = originalFindFiles;
+		(vscode.workspace as any).openTextDocument = originalOpenTextDocument;
+	});
 });

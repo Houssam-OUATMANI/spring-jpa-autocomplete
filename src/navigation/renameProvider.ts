@@ -33,6 +33,10 @@ export class SpringJpaRenameProvider implements vscode.RenameProvider {
 		newName: string,
 		_token: vscode.CancellationToken,
 	): Promise<vscode.WorkspaceEdit | undefined> {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava) {
+			return undefined;
+		}
 		const wordRange = document.getWordRangeAtPosition(position);
 		if (!wordRange) {
 			return undefined;

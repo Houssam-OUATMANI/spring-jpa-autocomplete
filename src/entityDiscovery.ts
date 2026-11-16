@@ -329,10 +329,31 @@ export class WorkspaceEntityIndex {
 				if (isExcludedJavaUri(uri, includeTestSources)) {
 					continue;
 				}
-				const doc = await vscode.workspace.openTextDocument(uri);
-				const entity = this.updateDocument(doc, false);
-				if (entity && entity.name.toLowerCase() === entityName.toLowerCase()) {
-					return entity;
+				try {
+					const doc = await vscode.workspace.openTextDocument(uri);
+					this.updateDocument(doc, false);
+				} catch {
+					try {
+						const bytes = await vscode.workspace.fs.readFile(uri);
+						const text = Buffer.from(bytes).toString('utf8');
+						const projectionTypes: ProjectionTypeInfo[] = [];
+						const entities = parseEntityModels(text, uri, projectionTypes);
+						if (entities.length > 0) {
+							const uriKey = uri.toString();
+							this.entitiesByUri.set(uriKey, entities);
+							this.updateNameIndex(uriKey, entities);
+							this.allEntitiesCache = undefined;
+						}
+					} catch {
+						// ignore
+					}
+				}
+				const matching = this.getEntitiesForUri(uri).find((e) => e.name.toLowerCase() === entityName.toLowerCase());
+				if (matching) {
+					if (matching.superclassName && !this.getEntity(matching.superclassName)) {
+						await this.discoverMissingEntity(matching.superclassName, uri);
+					}
+					return matching;
 				}
 			}
 		} catch {
@@ -426,7 +447,8 @@ export class WorkspaceEntityIndex {
 	}
 
 	public updateDocument(document: vscode.TextDocument, persist = false): EntityInfo | undefined {
-		if (document.languageId !== 'java' || isExcludedJavaUri(document.uri, this.includeTestSources())) {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava || isExcludedJavaUri(document.uri, this.includeTestSources())) {
 			this.lastUpdateStructuralChange = false;
 			return undefined;
 		}
@@ -473,7 +495,8 @@ export class WorkspaceEntityIndex {
 	}
 
 	public async updateDocumentAsync(document: vscode.TextDocument, persist = false): Promise<boolean> {
-		if (document.languageId !== 'java' || isExcludedJavaUri(document.uri, this.includeTestSources())) {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava || isExcludedJavaUri(document.uri, this.includeTestSources())) {
 			return false;
 		}
 		const uriKey = document.uri.toString();
@@ -680,7 +703,7 @@ export class WorkspaceEntityIndex {
 	public async getCandidateDocuments(): Promise<vscode.TextDocument[]> {
 		const openDocsByUri = new Map<string, vscode.TextDocument>();
 		for (const doc of vscode.workspace.textDocuments) {
-			if (doc.languageId === 'java') {
+			if (doc.languageId === 'java' || doc.uri.path.endsWith('.java')) {
 				openDocsByUri.set(doc.uri.toString(), doc);
 			}
 		}
@@ -1040,10 +1063,11 @@ export async function discoverEntities(currentDocument: vscode.TextDocument): Pr
 	await index.ensureInitialized();
 	let entities = getIndexedEntities(currentDocument);
 
-	// On-demand entity discovery: if this repository's entity is not yet in the index
+	// On-demand entity discovery: if this repository's entity is not yet in the index for this module
 	const managedNames = extractRepositoryEntityNames(currentDocument.getText());
 	for (const name of managedNames) {
-		if (!entities.some((e) => e.name.toLowerCase() === name.toLowerCase())) {
+		const hasLocalOrShared = entities.some((e) => e.name.toLowerCase() === name.toLowerCase() && isSameOrSharedModule(e.uri, currentDocument.uri));
+		if (!hasLocalOrShared) {
 			const discovered = await index.discoverMissingEntity(name, currentDocument.uri);
 			if (discovered) {
 				entities = getIndexedEntities(currentDocument);

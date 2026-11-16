@@ -12,6 +12,10 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 		_context: vscode.ReferenceContext,
 		_token: vscode.CancellationToken,
 	): Promise<vscode.Location[]> {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava) {
+			return [];
+		}
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
 		const allEntities = index.getEntitiesForDocument(document);
@@ -43,7 +47,8 @@ export class SpringJpaReferenceProvider implements vscode.ReferenceProvider {
 		// Search across candidate repository and open documents in workspace
 		const candidateDocs = await index.getCandidateDocuments();
 		for (const doc of candidateDocs) {
-			if (doc.languageId !== 'java' || (doc.uri.toString() !== document.uri.toString() && !isSameOrSharedModule(doc.uri, document.uri))) {
+			const isDocJava = doc.languageId === 'java' || doc.uri.path.endsWith('.java');
+			if (!isDocJava || (doc.uri.toString() !== document.uri.toString() && !isSameOrSharedModule(doc.uri, document.uri))) {
 				continue;
 			}
 			const text = doc.getText();

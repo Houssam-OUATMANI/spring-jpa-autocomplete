@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { createEntityLookup, discoverEntities, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, discoverEntities, extractRepositoryEntityNames, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { isSameOrSharedModule } from '../workspace/moduleResolver';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { getJpqlDocumentation } from '../jpql/jpqlDocumentation';
 import { getMongoOperatorAt, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
@@ -11,10 +12,18 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 		position: vscode.Position,
 		_token: vscode.CancellationToken,
 	): Promise<vscode.Hover | undefined> {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava) {
+			return undefined;
+		}
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
 		let entities = index.getEntitiesForDocument(document);
-		if (entities.length === 0) {
+		const repoEntityNames = extractRepositoryEntityNames(document.getText());
+		const hasMissingRepoEntity = repoEntityNames.some(
+			(name) => !entities.some((e) => e.name.toLowerCase() === name.toLowerCase() && isSameOrSharedModule(e.uri, document.uri))
+		);
+		if (entities.length === 0 || hasMissingRepoEntity) {
 			entities = await discoverEntities(document);
 		}
 		const offset = document.offsetAt(position);
@@ -36,7 +45,11 @@ export class SpringJpaHoverProvider implements vscode.HoverProvider {
 		}
 
 		const word = document.getText(wordRange);
-		const entity = entities.find((candidate) => candidate.name === word);
+		let entity = entities.find((candidate) => candidate.name.toLowerCase() === word.toLowerCase() && isSameOrSharedModule(candidate.uri, document.uri))
+			?? entities.find((candidate) => candidate.name.toLowerCase() === word.toLowerCase());
+		if (!entity && repoEntityNames.some((n) => n.toLowerCase() === word.toLowerCase())) {
+			entity = await index.discoverMissingEntity(word, document.uri);
+		}
 		if (entity) {
 			return new vscode.Hover(new vscode.MarkdownString(`**JPA entity** ${entity.name}\n\n${entity.properties.length} properties\n\n${entity.uri.fsPath}`), wordRange);
 		}

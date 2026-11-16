@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { createEntityLookup, discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { createEntityLookup, discoverEntities, extractRepositoryEntityNames, extractRepositoryEntityNameAt, findEntityProperties, resolveEntityPropertyPathWithOwner, WorkspaceEntityIndex } from '../entityDiscovery';
+import { isSameOrSharedModule } from '../workspace/moduleResolver';
 import { extractAllJpqlQueries } from '../jpql/jpqlParser';
 import { parseDerivedMethodName } from '../derivedQuery/queryParser';
 import { findMongoFieldAt, findMongoTemplateFieldAccesses, isMongoRepositoryAt, MONGO_REPOSITORY_TYPES } from '../mongoSupport';
@@ -10,10 +11,18 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		position: vscode.Position,
 		token: vscode.CancellationToken,
 	): Promise<vscode.Definition | undefined> {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava) {
+			return undefined;
+		}
 		const index = WorkspaceEntityIndex.getInstance();
 		await index.ensureInitialized();
 		let entities = index.getEntitiesForDocument(document);
-		if (entities.length === 0) {
+		const repoEntityNames = extractRepositoryEntityNames(document.getText());
+		const hasMissingRepoEntity = repoEntityNames.some(
+			(name) => !entities.some((e) => e.name.toLowerCase() === name.toLowerCase() && isSameOrSharedModule(e.uri, document.uri))
+		);
+		if (entities.length === 0 || hasMissingRepoEntity) {
 			entities = await discoverEntities(document);
 		}
 		const repositoryPackage = document.getText().match(/\bpackage\s+([\w.]+)\s*;/)?.[1];
@@ -29,7 +38,10 @@ export class SpringJpaDefinitionProvider implements vscode.DefinitionProvider {
 		// 1. Navigation from Repository generic: JpaRepository<User, Long>
 		const genericMatch = lineText.match(/\b(?:JpaRepository|MongoRepository|ReactiveMongoRepository|CrudRepository|ReactiveCrudRepository|ListCrudRepository|PagingAndSortingRepository)\s*<\s*([A-Z]\w*)/);
 		if (genericMatch && genericMatch[1] === word) {
-			const targetEntity = entityMap.get(word.toLowerCase());
+			let targetEntity = entityMap.get(word.toLowerCase());
+			if (!targetEntity) {
+				targetEntity = await index.discoverMissingEntity(word, document.uri);
+			}
 			if (targetEntity) {
 				return new vscode.Location(targetEntity.uri, new vscode.Position(0, 0));
 			}

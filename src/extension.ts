@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { discoverEntities, extractRepositoryEntityNameAt, findEntityProperties, getIndexedEntities, isExcludedJavaUri, WorkspaceEntityIndex } from './entityDiscovery';
+import { discoverEntities, extractRepositoryEntityNames, extractRepositoryEntityNameAt, findEntityProperties, getIndexedEntities, isExcludedJavaUri, WorkspaceEntityIndex } from './entityDiscovery';
 import { isJpaPrefix, isRepositoryDeclarationHeader, isRepositoryMethodContext, JPA_KEYWORDS, validateDerivedMethod } from './jpaKeywords';
 import { createKeywordItem } from './legacyHelpers';
 import { createDerivedQueryCompletions } from './derivedQuery/queryCompletion';
@@ -14,7 +14,7 @@ import { SpringJpaCodeActionProvider } from './actions/codeActionProvider';
 import { generateRepositoryMethod, RepositoryMethodKind, RepositoryQueryOperator } from './repositoryGenerator';
 import { maskJavaSource, parseJavaParameters } from './javaParsing';
 import { clearDialectCache, resolveSqlDialect, SQL_DIALECT_OPTIONS, setDocumentSqlDialect, SqlDialectSetting } from './jpql/sqlDialect';
-import { clearModuleCache, discoverWorkspaceModules, normalizePath } from './workspace/moduleResolver';
+import { clearModuleCache, discoverWorkspaceModules, isSameOrSharedModule, normalizePath } from './workspace/moduleResolver';
 import { validateJpaEntities } from './entityValidator';
 import { SpringJpaReferenceProvider } from './navigation/referenceProvider';
 import { SpringJpaRenameProvider } from './navigation/renameProvider';
@@ -241,7 +241,13 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		try {
 			clearModuleCache();
-			const doc = await vscode.workspace.openTextDocument(uri);
+			let doc: vscode.TextDocument;
+			try {
+				doc = await vscode.workspace.openTextDocument(uri);
+			} catch {
+				await new Promise((resolve) => setTimeout(resolve, 100));
+				doc = await vscode.workspace.openTextDocument(uri);
+			}
 			await indexJavaDocument(doc);
 		} catch (error) {
 			output.appendLine(`Could not index Java file ${uri.toString()}: ${error instanceof Error ? error.message : String(error)}`);
@@ -342,9 +348,21 @@ export function activate(context: vscode.ExtensionContext) {
 				if (isRepositoryDeclarationHeader(sourcePrefix)) {
 					return undefined;
 				}
+				const repoEntityNames = extractRepositoryEntityNames(docText);
 				let entities = getIndexedEntities(document);
-				if (entities.length === 0) {
+				const hasMissingRepoEntity = repoEntityNames.some(
+					(name) => !entities.some((e) => e.name.toLowerCase() === name.toLowerCase() && isSameOrSharedModule(e.uri, document.uri))
+				);
+				if (entities.length === 0 || hasMissingRepoEntity || !entityIndex.isReady()) {
 					entities = await discoverEntities(document);
+				}
+
+				const repoEntityAtCursor = extractRepositoryEntityNameAt(docText, offset);
+				if (repoEntityAtCursor && !entities.some((e) => e.name.toLowerCase() === repoEntityAtCursor.toLowerCase() && isSameOrSharedModule(e.uri, document.uri))) {
+					const discovered = await entityIndex.discoverMissingEntity(repoEntityAtCursor, document.uri);
+					if (discovered) {
+						entities = getIndexedEntities(document);
+					}
 				}
 
 				if (/\b(?:Reactive)?MongoTemplate\b/.test(docText) && /\bCriteria\s*\.\s*where\s*\(/.test(docText)) {
@@ -385,7 +403,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 
 				// B. Derived Query & Keyword Completion
-				const properties = findEntityProperties(docText, entities, extractRepositoryEntityNameAt(docText, offset));
+				const properties = findEntityProperties(docText, entities, repoEntityAtCursor ?? extractRepositoryEntityNameAt(docText, offset), document.uri);
 				const queryBackend = isMongoRepositoryAt(docText, offset) ? 'mongo' : 'jpa';
 				const derivedItems = createDerivedQueryCompletions(linePrefix, properties, position, queryBackend);
 				if (derivedItems.length > 0) {
@@ -528,7 +546,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 				let properties = propertiesByEntity.get(repositoryEntityName);
 				if (!properties) {
-					properties = findEntityProperties(docText, entities, repositoryEntityName);
+					properties = findEntityProperties(docText, entities, repositoryEntityName, document.uri);
 					propertiesByEntity.set(repositoryEntityName, properties);
 				}
 				const parameters = parseMethodParameters(paramsText);
@@ -729,13 +747,15 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument((document) => {
-		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava || isExcludedJavaDocument(document)) {
 			return;
 		}
 		void indexJavaDocument(document);
 	}));
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(({ document }) => {
-		if (document.languageId !== 'java' || isExcludedJavaDocument(document)) {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (!isJava || isExcludedJavaDocument(document)) {
 			return;
 		}
 		if (!hasJpaDiagnosticTargets(document.getText()) && !entityIndex.hasUri(document.uri)) {
@@ -744,7 +764,8 @@ export function activate(context: vscode.ExtensionContext) {
 		scheduleJavaDiagnostics(document);
 	}));
 	context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((document) => {
-		if (document.languageId === 'java' && !isExcludedJavaDocument(document)) {
+		const isJava = document.languageId === 'java' || document.uri.path.endsWith('.java');
+		if (isJava && !isExcludedJavaDocument(document)) {
 			void indexJavaDocument(document, true);
 		}
 	}));
