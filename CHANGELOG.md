@@ -5,6 +5,25 @@ All notable changes to the "Spring Data JPA Tools" extension will be documented 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
 
+## [2.2.0] - 2026-11-16
+
+### Fixed
+
+- **Real-Time Entity Discovery for Microservices (no restart required)**:
+  - **Root Cause Eliminated** — When the entity index already contained entities from other microservices or shared libraries (i.e. `entities.length > 0`), on-demand entity discovery was incorrectly skipped. This caused `UserRepository extends JpaRepository<User, UUID>` to show no CodeLens and no properties in `findBy` completion until a "Reload Window" forced a full re-index.
+  - **CodeLens on first open** — `SpringJpaCodeLensProvider` now checks whether the specific repository entity (e.g. `User`) is present in the current module's index — not just whether the global index is non-empty — and triggers targeted discovery immediately if it is missing.
+  - **Completion on first keystroke** — `provideCompletionItems` performs the same local-module check before resolving `findEntityProperties`. Entity properties (`id`, `username`, `email`, …) are now suggested on the first `findBy` keystroke without any restart.
+  - **Definition / Hover / References** — `SpringJpaDefinitionProvider` and `SpringJpaHoverProvider` apply the same smart check and perform on-demand discovery before looking up entity properties or navigating to source.
+  - **Superclass resolution** — `discoverMissingEntity` now resolves `@MappedSuperclass` hierarchies recursively when the discovered entity has a superclass that is also missing from the index.
+  - **Fallback `fs.readFile` path** — On Windows, `openTextDocument` can fail transiently with a lock error while a file is being written by the build system. A direct `fs.readFile` fallback ensures indexing still completes in that scenario.
+  - **Watcher recovery** — The file system watcher for `.java` files now retries `openTextDocument` once (with 100 ms delay) before logging an error, eliminating spurious "Could not index" warnings at project creation time.
+
+### Improved
+
+- **Module-scoped entity resolution priority** — All providers (`CodeLens`, `Definition`, `Hover`, `Reference`, `Rename`) prefer entities from the same module or shared libraries before falling back to entities from unrelated modules, ensuring each microservice sees its own model first.
+- **Document language-ID tolerance** — Entity indexing now accepts `.java` files even when VS Code has not yet assigned them `languageId === 'java'` (e.g. files opened programmatically via `findFiles` before the language server activates). Prevents silent no-ops during background batch indexing.
+
+
 ## [2.1.0] - 2026-11-12
 
 ### Added

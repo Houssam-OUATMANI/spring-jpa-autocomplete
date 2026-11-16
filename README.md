@@ -1,6 +1,6 @@
 # Spring Data JPA & MongoDB Tools
 
-**Version 2.1.0**
+**Version 2.2.0**
 
 [Install from Visual Studio Code Marketplace](https://marketplace.visualstudio.com/items?itemName=houssam-ouatmani.spring-jpa-autocomplete)
 <br>
@@ -118,6 +118,7 @@ In complex monorepos, multi-project builds, or microservice wrappers:
 - **Shared Libraries & Common Modules**: Base entities and `@MappedSuperclass` models defined in shared libraries (e.g. `common-lib`, `core-domain`) are inherited seamlessly across all dependent microservices.
 - **Localized SQL Dialect & Profiles**: Each microservice automatically detects its own database dialect from its local `src/main/resources/application*.yml` or `application*.properties`, supporting Spring profiles (e.g. `application-dev.yml`), R2DBC URLs, and database driver classes.
 - **Dynamic Multi-Root Support**: VS Code multi-root workspaces (`.code-workspace`) and build descriptor updates (`pom.xml`, `build.gradle`, `settings.gradle`) are dynamically tracked without needing to restart the editor.
+- **Zero-Restart Live Indexing**: Opening a repository file in a microservice immediately discovers and indexes its managed entity without requiring an IDE restart or Reload Window. CodeLens and `findBy` property completion are available on first open.
 
 ## Feature Reference
 
@@ -230,7 +231,7 @@ npm run test:unit
 
 Run `npm run package:check` to execute the release checks without creating a VSIX package.
 
-The latest release is `2.1.0`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
+The latest release is `2.2.0`; see [CHANGELOG.md](CHANGELOG.md) for full release notes.
 
 ## Requirements
 
